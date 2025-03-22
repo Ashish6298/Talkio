@@ -1,7 +1,11 @@
+
+
+
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'chat_screen.dart';
+import 'user_list_screen.dart'; // Import the new UserListScreen
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -32,7 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => ChatScreen(token: token),
+          builder: (context) => UserListScreen(token: token), // Navigate to UserListScreen
         ),
       );
     } else {

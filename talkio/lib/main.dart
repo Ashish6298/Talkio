@@ -1,3 +1,7 @@
+
+
+
+
 import 'package:flutter/material.dart';
 import 'screens/register_screen.dart';
 
@@ -11,11 +15,13 @@ class ConvoFlowApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Talkio',
+      title: 'Talkio', // Updated to match app name
       theme: ThemeData(
         primarySwatch: Colors.blue,
+        useMaterial3: true, // Optional: Enable Material 3 for modern design
       ),
       home: const RegisterScreen(),
+      debugShowCheckedModeBanner: false, // Optional: Remove debug banner
     );
   }
 }

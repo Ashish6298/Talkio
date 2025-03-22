@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -5,8 +6,15 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 
 class ChatScreen extends StatefulWidget {
   final String token;
+  final String receiverId;
+  final String receiverUsername;
 
-  const ChatScreen({super.key, required this.token});
+  const ChatScreen({
+    super.key,
+    required this.token,
+    required this.receiverId,
+    required this.receiverUsername,
+  });
 
   @override
   _ChatScreenState createState() => _ChatScreenState();
@@ -16,38 +24,14 @@ class _ChatScreenState extends State<ChatScreen> {
   late io.Socket socket;
   final _messageController = TextEditingController();
   final List<Map<String, dynamic>> _messages = [];
-  List<Map<String, dynamic>> _users = [];
-  String? _selectedUserId;
   String? _currentUserId;
-  String? _selectedUsername; // To store the username of the selected user
 
   @override
   void initState() {
     super.initState();
     _currentUserId = _getUserIdFromToken();
-    _fetchUsers();
     _connectSocket();
-  }
-
-  Future<void> _fetchUsers() async {
-    final url = Uri.parse('http://10.0.2.2:5000/api/users');
-    final response = await http.get(
-      url,
-      headers: {'Authorization': 'Bearer ${widget.token}'},
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      if (data['success']) {
-        setState(() {
-          _users = List<Map<String, dynamic>>.from(data['users'])
-              .where((user) => user['_id'] != _currentUserId)
-              .toList();
-        });
-      }
-    } else {
-      print('Failed to fetch users: ${response.body}');
-    }
+    _fetchChatHistory();
   }
 
   void _connectSocket() {
@@ -85,9 +69,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _fetchChatHistory() async {
-    if (_selectedUserId == null) return;
-
-    final url = Uri.parse('http://10.0.2.2:5000/api/messages/$_selectedUserId');
+    final url = Uri.parse('http://10.0.2.2:5000/api/messages/${widget.receiverId}');
     final response = await http.get(
       url,
       headers: {'Authorization': 'Bearer ${widget.token}'},
@@ -107,10 +89,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _sendMessage() {
-    if (_selectedUserId == null || _messageController.text.isEmpty) return;
+    if (_messageController.text.isEmpty) return;
 
     final message = {
-      'receiverId': _selectedUserId,
+      'receiverId': widget.receiverId,
       'content': _messageController.text,
     };
 
@@ -125,11 +107,17 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
+  String _formatTimestamp(String utcTimestamp) {
+    final utcDateTime = DateTime.parse(utcTimestamp);
+    final istDateTime = utcDateTime.add(const Duration(hours: 5, minutes: 30));
+    return '${istDateTime.hour.toString().padLeft(2, '0')}:${istDateTime.minute.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_selectedUsername != null ? 'Chat with $_selectedUsername' : 'Chat'),
+        title: Text('Chat with ${widget.receiverUsername}'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -139,27 +127,6 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: DropdownButton<String>(
-              hint: const Text('Select a user to chat with'),
-              value: _selectedUserId,
-              isExpanded: true,
-              items: _users.map((user) {
-                return DropdownMenuItem<String>(
-                  value: user['_id'],
-                  child: Text(user['username']),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedUserId = value;
-                  _selectedUsername = _users.firstWhere((user) => user['_id'] == value)['username'];
-                  _fetchChatHistory();
-                });
-              },
-            ),
-          ),
           Expanded(
             child: ListView.builder(
               itemCount: _messages.length,
@@ -179,7 +146,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                       children: [
                         Text(
-                          isSentByMe ? 'You' : _selectedUsername ?? 'Other',
+                          isSentByMe ? 'You' : widget.receiverUsername,
                           style: TextStyle(
                             fontSize: 12,
                             color: isSentByMe ? Colors.blue[800] : Colors.grey[800],
@@ -193,7 +160,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                         const SizedBox(height: 5),
                         Text(
-                          message['timestamp'].toString().substring(11, 16),
+                          _formatTimestamp(message['timestamp']),
                           style: TextStyle(fontSize: 10, color: Colors.grey[600]),
                         ),
                       ],
