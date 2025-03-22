@@ -1,4 +1,5 @@
 
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -54,13 +55,18 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     socket.on('receiveMessage', (data) {
-      setState(() {
-        _messages.add(data);
-      });
+      if (data['sender'] == widget.receiverId || data['receiver'] == widget.receiverId) {
+        setState(() {
+          _messages.add(data);
+        });
+      }
     });
 
     socket.on('error', (error) {
       print('Socket error: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error['error'] ?? 'An error occurred')),
+      );
     });
 
     socket.onDisconnect((_) {
@@ -85,6 +91,9 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     } else {
       print('Failed to fetch chat history: ${response.body}');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to fetch chat history')),
+      );
     }
   }
 

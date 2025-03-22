@@ -1,6 +1,10 @@
+
+
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'chat_screen.dart';
 
 class UserListScreen extends StatefulWidget {
@@ -13,17 +17,67 @@ class UserListScreen extends StatefulWidget {
 }
 
 class _UserListScreenState extends State<UserListScreen> {
-  List<Map<String, dynamic>> _users = [];
-  List<Map<String, dynamic>> _filteredUsers = [];
+  List<Map<String, dynamic>> _friends = [];
+  List<Map<String, dynamic>> _strangers = [];
+  List<Map<String, dynamic>> _filteredFriends = [];
+  List<Map<String, dynamic>> _filteredStrangers = [];
   String? _currentUserId;
   final _searchController = TextEditingController();
+  late io.Socket socket;
 
   @override
   void initState() {
     super.initState();
     _currentUserId = _getUserIdFromToken();
+    _connectSocket();
     _fetchUsers();
     _searchController.addListener(_filterUsers);
+  }
+
+  void _connectSocket() {
+    socket = io.io('http://10.0.2.2:5000', {
+      'transports': ['websocket'],
+      'autoConnect': false,
+      'auth': {'token': widget.token},
+    });
+
+    socket.connect();
+
+    socket.onConnect((_) {
+      print('Connected to Socket.IO');
+    });
+
+    socket.on('friendRequestReceived', (data) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Friend request received from ${data['senderUsername']}')),
+      );
+      _fetchUsers();
+    });
+
+    socket.on('friendRequestSent', (data) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Friend request sent to ${data['receiverUsername']}')),
+      );
+      _fetchUsers();
+    });
+
+    socket.on('friendRequestAccepted', (data) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${data['username']} is now your friend!')),
+      );
+      _fetchUsers();
+    });
+
+    socket.on('error', (error) {
+      print('Socket error: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error['error'] ?? 'An error occurred')),
+      );
+    });
+
+    socket.onDisconnect((_) {
+      print('Disconnected from Socket.IO');
+    });
   }
 
   Future<void> _fetchUsers() async {
@@ -37,14 +91,17 @@ class _UserListScreenState extends State<UserListScreen> {
       final data = jsonDecode(response.body);
       if (data['success']) {
         setState(() {
-          _users = List<Map<String, dynamic>>.from(data['users'])
-              .where((user) => user['_id'] != _currentUserId)
-              .toList();
-          _filteredUsers = _users; // Initially show all users
+          _friends = List<Map<String, dynamic>>.from(data['friends']);
+          _strangers = List<Map<String, dynamic>>.from(data['strangers']);
+          _filteredFriends = _friends;
+          _filteredStrangers = _strangers;
         });
       }
     } else {
       print('Failed to fetch users: ${response.body}');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to fetch users')),
+      );
     }
   }
 
@@ -52,17 +109,64 @@ class _UserListScreenState extends State<UserListScreen> {
     final query = _searchController.text.toLowerCase();
     setState(() {
       if (query.isEmpty) {
-        _filteredUsers = _users; // Show all users if search is empty
+        _filteredFriends = _friends;
+        _filteredStrangers = _strangers;
       } else {
-        _filteredUsers = _users
+        _filteredFriends = _friends
+            .where((user) => user['username'].toLowerCase().contains(query))
+            .toList();
+        _filteredStrangers = _strangers
             .where((user) => user['username'].toLowerCase().contains(query))
             .toList();
       }
     });
   }
 
+  Future<void> _sendFriendRequest(String receiverId) async {
+    final url = Uri.parse('http://10.0.2.2:5000/api/send-friend-request');
+    final response = await http.post(
+      url,
+      headers: {
+        'Authorization': 'Bearer ${widget.token}',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'receiverId': receiverId}),
+    );
+
+    final data = jsonDecode(response.body);
+    if (response.statusCode == 200 && data['success']) {
+      // No need for manual refresh; Socket.IO will handle it
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(data['message'] ?? 'Failed to send request')),
+      );
+    }
+  }
+
+  Future<void> _acceptFriendRequest(String senderId) async {
+    final url = Uri.parse('http://10.0.2.2:5000/api/accept-friend-request');
+    final response = await http.post(
+      url,
+      headers: {
+        'Authorization': 'Bearer ${widget.token}',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'senderId': senderId}),
+    );
+
+    final data = jsonDecode(response.body);
+    if (response.statusCode == 200 && data['success']) {
+      // No need for manual refresh; Socket.IO will handle it
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(data['message'] ?? 'Failed to accept request')),
+      );
+    }
+  }
+
   @override
   void dispose() {
+    socket.disconnect();
     _searchController.dispose();
     super.dispose();
   }
@@ -84,7 +188,6 @@ class _UserListScreenState extends State<UserListScreen> {
       ),
       body: Column(
         children: [
-          // Search Bar
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: TextField(
@@ -106,33 +209,79 @@ class _UserListScreenState extends State<UserListScreen> {
               ),
             ),
           ),
-          // User List
           Expanded(
-            child: _users.isEmpty
+            child: (_friends.isEmpty && _strangers.isEmpty)
                 ? const Center(child: CircularProgressIndicator())
-                : _filteredUsers.isEmpty
-                    ? const Center(child: Text('No users found'))
-                    : ListView.builder(
-                        itemCount: _filteredUsers.length,
-                        itemBuilder: (context, index) {
-                          final user = _filteredUsers[index];
-                          return ListTile(
-                            title: Text(user['username']),
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => ChatScreen(
-                                    token: widget.token,
-                                    receiverId: user['_id'],
-                                    receiverUsername: user['username'],
+                : ListView(
+                    children: [
+                      if (_filteredFriends.isNotEmpty) ...[
+                        const Padding(
+                          padding: EdgeInsets.all(8.0),
+                          child: Text(
+                            'Friends',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _filteredFriends.length,
+                          itemBuilder: (context, index) {
+                            final user = _filteredFriends[index];
+                            return ListTile(
+                              title: Text(user['username']),
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => ChatScreen(
+                                      token: widget.token,
+                                      receiverId: user['_id'],
+                                      receiverUsername: user['username'],
+                                    ),
                                   ),
-                                ),
-                              );
-                            },
-                          );
-                        },
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ],
+                      const Padding(
+                        padding: EdgeInsets.all(8.0),
+                        child: Text(
+                          'People You May Know',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
                       ),
+                      _filteredStrangers.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(8.0),
+                              child: Text('No users found'),
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: _filteredStrangers.length,
+                              itemBuilder: (context, index) {
+                                final user = _filteredStrangers[index];
+                                return ListTile(
+                                  title: Text(user['username']),
+                                  trailing: user['isReceivedRequest']
+                                      ? ElevatedButton(
+                                          onPressed: () => _acceptFriendRequest(user['_id']),
+                                          child: const Text('Accept'),
+                                        )
+                                      : user['isSentRequest']
+                                          ? const Text('Request Sent')
+                                          : ElevatedButton(
+                                              onPressed: () => _sendFriendRequest(user['_id']),
+                                              child: const Text('Add Friend'),
+                                            ),
+                                );
+                              },
+                            ),
+                    ],
+                  ),
           ),
         ],
       ),
