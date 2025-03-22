@@ -1,24 +1,23 @@
 
 import 'package:flutter/material.dart';
-// import 'screens/register_screen.dart';
-import 'screens/login_screen.dart';
+import 'screens/splash_screen.dart';
+
 void main() {
-  runApp(const ConvoFlowApp());
+  runApp(const MyApp());
 }
 
-class ConvoFlowApp extends StatelessWidget {
-  const ConvoFlowApp({super.key});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Talkio', // Updated to match app name
+      title: 'Talk-Io',
       theme: ThemeData(
         primarySwatch: Colors.blue,
-        useMaterial3: true, // Optional: Enable Material 3 for modern design
       ),
-      home: const LoginScreen(),
-      debugShowCheckedModeBanner: false, // Optional: Remove debug banner
+      home: const SplashScreen(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
