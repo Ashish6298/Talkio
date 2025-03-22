@@ -98,7 +98,7 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
                 FadeTransition(
                   opacity: _fadeAnimation,
                   child: const Text(
-                    'ConvoFlow',
+                    'Talk-Io',
                     style: TextStyle(
                       fontSize: 48,
                       fontWeight: FontWeight.bold,

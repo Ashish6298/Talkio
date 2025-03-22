@@ -92,7 +92,7 @@ class _OtpScreenState extends State<OtpScreen> with SingleTickerProviderStateMix
                 FadeTransition(
                   opacity: _fadeAnimation,
                   child: const Text(
-                    'ConvoFlow',
+                    'Talk-Io',
                     style: TextStyle(
                       fontSize: 48,
                       fontWeight: FontWeight.bold,
