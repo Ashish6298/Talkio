@@ -1,3 +1,16 @@
+// const mongoose = require('mongoose');
+
+// const messageSchema = new mongoose.Schema({
+//   sender: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+//   receiver: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+//   content: { type: String, required: true },
+//   timestamp: { type: Date, default: Date.now },
+// });
+
+// module.exports = mongoose.model('Message', messageSchema);
+
+
+
 const mongoose = require('mongoose');
 
 const messageSchema = new mongoose.Schema({
@@ -5,6 +18,7 @@ const messageSchema = new mongoose.Schema({
   receiver: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   content: { type: String, required: true },
   timestamp: { type: Date, default: Date.now },
+  seen: { type: Boolean, default: false }, // New field to track if the message is seen
 });
 
 module.exports = mongoose.model('Message', messageSchema);

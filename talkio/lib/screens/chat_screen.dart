@@ -1,5 +1,4 @@
 
-
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -33,6 +32,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _currentUserId = _getUserIdFromToken();
     _connectSocket();
     _fetchChatHistory();
+    _markMessagesAsSeen();
   }
 
   void _connectSocket() {
@@ -60,6 +60,16 @@ class _ChatScreenState extends State<ChatScreen> {
           _messages.add(data);
         });
       }
+    });
+
+    socket.on('messageSeen', (data) {
+      final messageId = data['messageId'];
+      setState(() {
+        final messageIndex = _messages.indexWhere((msg) => msg['_id'] == messageId);
+        if (messageIndex != -1) {
+          _messages[messageIndex]['seen'] = true;
+        }
+      });
     });
 
     socket.on('error', (error) {
@@ -95,6 +105,10 @@ class _ChatScreenState extends State<ChatScreen> {
         SnackBar(content: Text('Failed to fetch chat history')),
       );
     }
+  }
+
+  void _markMessagesAsSeen() {
+    socket.emit('markMessagesAsSeen', {'senderId': widget.receiverId});
   }
 
   void _sendMessage() {
@@ -163,14 +177,39 @@ class _ChatScreenState extends State<ChatScreen> {
                           ),
                         ),
                         const SizedBox(height: 5),
-                        Text(
-                          message['content'],
-                          style: const TextStyle(fontSize: 16),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              message['content'],
+                              style: const TextStyle(fontSize: 16),
+                            ),
+                            if (isSentByMe) ...[
+                              const SizedBox(width: 5),
+                              Icon(
+                                Icons.done_all,
+                                size: 16,
+                                color: Colors.grey, // Always grey ticks
+                              ),
+                            ],
+                          ],
                         ),
                         const SizedBox(height: 5),
-                        Text(
-                          _formatTimestamp(message['timestamp']),
-                          style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _formatTimestamp(message['timestamp']),
+                              style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                            ),
+                            if (isSentByMe && message['seen'] == true) ...[
+                              const SizedBox(width: 5),
+                              Text(
+                                'Seen',
+                                style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                              ),
+                            ],
+                          ],
                         ),
                       ],
                     ),

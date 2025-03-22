@@ -1,11 +1,9 @@
-
-
-
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'chat_screen.dart';
+import 'login_screen.dart'; // Import LoginScreen
 
 class UserListScreen extends StatefulWidget {
   final String token;
@@ -135,7 +133,7 @@ class _UserListScreenState extends State<UserListScreen> {
 
     final data = jsonDecode(response.body);
     if (response.statusCode == 200 && data['success']) {
-      // No need for manual refresh; Socket.IO will handle it
+      // Socket.IO will handle the update
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(data['message'] ?? 'Failed to send request')),
@@ -156,12 +154,23 @@ class _UserListScreenState extends State<UserListScreen> {
 
     final data = jsonDecode(response.body);
     if (response.statusCode == 200 && data['success']) {
-      // No need for manual refresh; Socket.IO will handle it
+      // Socket.IO will handle the update
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(data['message'] ?? 'Failed to accept request')),
       );
     }
+  }
+
+  void _logout() {
+    // Disconnect Socket.IO
+    socket.disconnect();
+    // Navigate to LoginScreen and remove all previous routes
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+      (Route<dynamic> route) => false, // Remove all previous routes
+    );
   }
 
   @override
@@ -183,6 +192,11 @@ class _UserListScreenState extends State<UserListScreen> {
               _searchController.clear();
               _fetchUsers();
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: _logout,
+            tooltip: 'Logout', // Optional: Add a tooltip for accessibility
           ),
         ],
       ),
