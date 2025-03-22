@@ -62,12 +62,23 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
 
+    socket.on('messageDelivered', (data) {
+      final messageId = data['messageId'];
+      setState(() {
+        final messageIndex = _messages.indexWhere((msg) => msg['_id'] == messageId);
+        if (messageIndex != -1) {
+          _messages[messageIndex]['deliveredAt'] = data['deliveredAt'];
+        }
+      });
+    });
+
     socket.on('messageSeen', (data) {
       final messageId = data['messageId'];
       setState(() {
         final messageIndex = _messages.indexWhere((msg) => msg['_id'] == messageId);
         if (messageIndex != -1) {
           _messages[messageIndex]['seen'] = true;
+          _messages[messageIndex]['seenAt'] = data['seenAt'];
         }
       });
     });
@@ -130,17 +141,50 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
-  String _formatTimestamp(String utcTimestamp) {
+  String _formatTimestampForMessage(String utcTimestamp) {
     final utcDateTime = DateTime.parse(utcTimestamp);
     final istDateTime = utcDateTime.add(const Duration(hours: 5, minutes: 30));
     return '${istDateTime.hour.toString().padLeft(2, '0')}:${istDateTime.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _formatTimestampForDialog(String? utcTimestamp) {
+    if (utcTimestamp == null) return 'N/A';
+    final utcDateTime = DateTime.parse(utcTimestamp);
+    final istDateTime = utcDateTime.add(const Duration(hours: 5, minutes: 30));
+    return '${istDateTime.day}/${istDateTime.month}/${istDateTime.year} ${istDateTime.hour.toString().padLeft(2, '0')}:${istDateTime.minute.toString().padLeft(2, '0')}';
+  }
+
+  void _showMessageInfo(Map<String, dynamic> message) {
+    final isSentByMe = message['sender'] == _currentUserId;
+    if (!isSentByMe) return; // Only show info for messages sent by the user
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Message Info'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Delivered: ${_formatTimestampForDialog(message['deliveredAt'])}'),
+            Text('Seen: ${_formatTimestampForDialog(message['seenAt'])}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Chat with ${widget.receiverUsername}'),
+        title: Text(' ${widget.receiverUsername}'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -156,62 +200,65 @@ class _ChatScreenState extends State<ChatScreen> {
               itemBuilder: (context, index) {
                 final message = _messages[index];
                 final isSentByMe = message['sender'] == _currentUserId;
-                return Align(
-                  alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 5, horizontal: 10),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: isSentByMe ? Colors.blue[100] : Colors.grey[200],
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          isSentByMe ? 'You' : widget.receiverUsername,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isSentByMe ? Colors.blue[800] : Colors.grey[800],
-                            fontWeight: FontWeight.bold,
+                return GestureDetector(
+                  onLongPress: () => _showMessageInfo(message),
+                  child: Align(
+                    alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 5, horizontal: 10),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: isSentByMe ? Colors.blue[100] : Colors.grey[200],
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isSentByMe ? 'You' : widget.receiverUsername,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isSentByMe ? Colors.blue[800] : Colors.grey[800],
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 5),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              message['content'],
-                              style: const TextStyle(fontSize: 16),
-                            ),
-                            if (isSentByMe) ...[
-                              const SizedBox(width: 5),
-                              Icon(
-                                Icons.done_all,
-                                size: 16,
-                                color: Colors.grey, // Always grey ticks
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 5),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              _formatTimestamp(message['timestamp']),
-                              style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-                            ),
-                            if (isSentByMe && message['seen'] == true) ...[
-                              const SizedBox(width: 5),
+                          const SizedBox(height: 5),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
                               Text(
-                                'Seen',
+                                message['content'],
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                              if (isSentByMe) ...[
+                                const SizedBox(width: 5),
+                                Icon(
+                                  Icons.done_all,
+                                  size: 16,
+                                  color: Colors.grey,
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 5),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _formatTimestampForMessage(message['timestamp']),
                                 style: TextStyle(fontSize: 10, color: Colors.grey[600]),
                               ),
+                              if (isSentByMe && message['seen'] == true) ...[
+                                const SizedBox(width: 5),
+                                Text(
+                                  'Seen',
+                                  style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                                ),
+                              ],
                             ],
-                          ],
-                        ),
-                      ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );

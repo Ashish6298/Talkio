@@ -1,6 +1,5 @@
 
 
-
 const jwt = require('jsonwebtoken');
 const Message = require('../models/Message');
 const User = require('../models/User');
@@ -41,12 +40,19 @@ const setupMessaging = (io) => {
           sender: senderId,
           receiver: receiverId,
           content,
-          seen: false, // Initially not seen
+          seen: false,
         });
         await message.save();
 
+        // Emit to receiver
         io.to(receiverId).emit("receiveMessage", message);
+        // Emit to sender
         socket.emit("messageSent", message);
+
+        // Simulate delivery (in a real app, this would depend on the recipient's connection)
+        message.deliveredAt = new Date();
+        await message.save();
+        io.to(senderId).emit("messageDelivered", { messageId: message._id, deliveredAt: message.deliveredAt });
 
         console.log(`Message sent from ${senderId} to ${receiverId}: ${content}`);
       } catch (error) {
@@ -58,7 +64,6 @@ const setupMessaging = (io) => {
     socket.on("markMessagesAsSeen", async ({ senderId }) => {
       try {
         const receiverId = socket.userId;
-        // Mark all messages from senderId to receiverId as seen
         const messages = await Message.find({
           sender: senderId,
           receiver: receiverId,
@@ -67,9 +72,12 @@ const setupMessaging = (io) => {
 
         for (const message of messages) {
           message.seen = true;
+          message.seenAt = new Date();
           await message.save();
-          // Notify the sender that their message was seen
-          io.to(senderId).emit("messageSeen", { messageId: message._id });
+          io.to(senderId).emit("messageSeen", {
+            messageId: message._id,
+            seenAt: message.seenAt,
+          });
         }
       } catch (error) {
         console.error("Error marking messages as seen:", error);
