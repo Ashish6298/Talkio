@@ -1,10 +1,7 @@
 
-
-
-
 import 'package:flutter/material.dart';
-import 'screens/register_screen.dart';
-
+// import 'screens/register_screen.dart';
+import 'screens/login_screen.dart';
 void main() {
   runApp(const ConvoFlowApp());
 }
@@ -20,7 +17,7 @@ class ConvoFlowApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         useMaterial3: true, // Optional: Enable Material 3 for modern design
       ),
-      home: const RegisterScreen(),
+      home: const LoginScreen(),
       debugShowCheckedModeBanner: false, // Optional: Remove debug banner
     );
   }
