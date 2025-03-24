@@ -17,6 +17,9 @@ dependencies:
   jwt_decode: ^0.3.1
   glassmorphism: ^3.0.0
   animated_text_kit: ^4.2.3
+  image_picker: ^1.1.2
+  permission_handler: ^11.4.0
+  cached_network_image: ^3.4.1
 
 dev_dependencies:
   flutter_test:

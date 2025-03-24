@@ -1,4 +1,4 @@
-
+//userController.js
 
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
@@ -18,17 +18,24 @@ const getUsers = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    const allUsers = await User.find({}, 'username _id').lean();
+    // Fetch all users, including the profilePic field
+    const allUsers = await User.find({}, 'username _id profilePic').lean();
 
     const friends = [];
     const strangers = [];
     for (const user of allUsers) {
       if (user._id.toString() === userId) continue;
       if (currentUser.friends.includes(user._id)) {
-        friends.push(user);
+        friends.push({
+          _id: user._id,
+          username: user.username,
+          profilePic: user.profilePic, // Include profilePic
+        });
       } else {
         strangers.push({
-          ...user,
+          _id: user._id,
+          username: user.username,
+          profilePic: user.profilePic, // Include profilePic
           isSentRequest: currentUser.sentRequests.includes(user._id),
           isReceivedRequest: currentUser.receivedRequests.includes(user._id),
         });

@@ -1,8 +1,8 @@
-
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as io;
+import 'package:cached_network_image/cached_network_image.dart'; // Import cached_network_image
 import 'chat_screen.dart';
 import 'login_screen.dart';
 
@@ -26,7 +26,7 @@ class _UserListScreenState extends State<UserListScreen> with SingleTickerProvid
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
-  Map<String, int> _unreadMessageCounts = {}; // Track unread message count for each friend
+  Map<String, int> _unreadMessageCounts = {};
 
   @override
   void initState() {
@@ -36,7 +36,6 @@ class _UserListScreenState extends State<UserListScreen> with SingleTickerProvid
     _fetchUsers();
     _searchController.addListener(_filterUsers);
 
-    // Initialize animation controller
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
@@ -107,20 +106,10 @@ class _UserListScreenState extends State<UserListScreen> with SingleTickerProvid
 
     socket.on('receiveMessage', (data) {
       final senderId = data['sender'];
-      // Check if the message is from a friend
       if (_friends.any((friend) => friend['_id'] == senderId)) {
         setState(() {
-          _unreadMessageCounts[senderId] = (_unreadMessageCounts[senderId] ?? 0) + 1; // Increment count
+          _unreadMessageCounts[senderId] = (_unreadMessageCounts[senderId] ?? 0) + 1;
         });
-        // ScaffoldMessenger.of(context).showSnackBar(
-        //   SnackBar(
-        //     content: Text(
-        //       'New message from ${data['senderUsername']}',
-        //       style: const TextStyle(color: Colors.white),
-        //     ),
-        //     backgroundColor: Colors.cyanAccent.withOpacity(0.8),
-        //   ),
-        // );
       }
     });
 
@@ -158,6 +147,9 @@ class _UserListScreenState extends State<UserListScreen> with SingleTickerProvid
           _filteredFriends = _friends;
           _filteredStrangers = _strangers;
         });
+        // Debug: Print the fetched data to verify profilePic is included
+        print('Friends: $_friends');
+        print('Strangers: $_strangers');
       }
     } else {
       print('Failed to fetch users: ${response.body}');
@@ -372,10 +364,11 @@ class _UserListScreenState extends State<UserListScreen> with SingleTickerProvid
                                   final unreadCount = _unreadMessageCounts[user['_id']] ?? 0;
                                   return _buildUserTile(
                                     username: user['username'],
+                                    profilePic: user['profilePic'],
                                     unreadCount: unreadCount,
                                     onTap: () {
                                       setState(() {
-                                        _unreadMessageCounts[user['_id']] = 0; // Reset count
+                                        _unreadMessageCounts[user['_id']] = 0;
                                       });
                                       Navigator.push(
                                         context,
@@ -426,6 +419,7 @@ class _UserListScreenState extends State<UserListScreen> with SingleTickerProvid
                                       final user = _filteredStrangers[index];
                                       return _buildUserTile(
                                         username: user['username'],
+                                        profilePic: user['profilePic'],
                                         trailing: user['isReceivedRequest']
                                             ? _buildActionButton(
                                                 text: 'Accept',
@@ -495,10 +489,12 @@ class _UserListScreenState extends State<UserListScreen> with SingleTickerProvid
 
   Widget _buildUserTile({
     required String username,
+    String? profilePic,
     VoidCallback? onTap,
     Widget? trailing,
     int unreadCount = 0,
   }) {
+    print('Attempting to load profile picture for $username: $profilePic'); // Debug log
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 5.0),
       decoration: BoxDecoration(
@@ -515,10 +511,29 @@ class _UserListScreenState extends State<UserListScreen> with SingleTickerProvid
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: Colors.cyanAccent.withOpacity(0.3),
-          child: Text(
-            username[0].toUpperCase(),
-            style: const TextStyle(color: Colors.white),
-          ),
+          child: profilePic != null && profilePic.isNotEmpty
+              ? ClipOval(
+                  child: CachedNetworkImage(
+                    imageUrl: profilePic,
+                    fit: BoxFit.cover,
+                    width: 40,
+                    height: 40,
+                    placeholder: (context, url) => const CircularProgressIndicator(
+                      color: Colors.cyanAccent,
+                    ),
+                    errorWidget: (context, url, error) {
+                      print('Error loading profile picture for $username: $error');
+                      return Text(
+                        username[0].toUpperCase(),
+                        style: const TextStyle(color: Colors.white),
+                      );
+                    },
+                  ),
+                )
+              : Text(
+                  username[0].toUpperCase(),
+                  style: const TextStyle(color: Colors.white),
+                ),
         ),
         title: Row(
           children: [

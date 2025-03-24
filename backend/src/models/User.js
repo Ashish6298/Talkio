@@ -6,6 +6,7 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   otp: { type: String },
   createdAt: { type: Date, default: Date.now },
+  profilePic: { type: String },
   friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // List of friends
   sentRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // Sent friend requests
   receivedRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // Received friend requests

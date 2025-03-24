@@ -53,7 +53,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   }
 
   Future<void> _login() async {
-    final url = Uri.parse('http://10.0.2.2:5000/api/auth/login');
+    final url = Uri.parse('http://10.0.2.2:5000/api/auth/login');  //10.0.2.2
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
