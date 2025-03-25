@@ -113,7 +113,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   Future<String> getDownloadDirectory() async {
     Directory? directory;
     if (Platform.isAndroid) {
-      // Use app-specific external storage directory to avoid broad storage permissions
       directory = await getExternalStorageDirectory();
       directory = Directory('${directory?.path}/Talkio');
     } else {
@@ -129,13 +128,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   Future<void> _checkAndRequestPermissions() async {
     AppLogger.info('Checking and requesting permissions...');
 
-    // Check microphone permission
     PermissionStatus micStatus = await Permission.microphone.status;
     if (!micStatus.isGranted) {
       micStatus = await Permission.microphone.request();
     }
 
-    // Check storage permission
     PermissionStatus storageStatus;
     bool storagePermissionGranted = false;
 
@@ -145,8 +142,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       AppLogger.info('Android SDK version: $sdkInt');
 
       if (sdkInt >= 33) {
-        // Android 13 and above: Use granular media permissions
-        // For images, we only need Permission.photos
         PermissionStatus photoStatus = await Permission.photos.status;
         if (!photoStatus.isGranted) {
           photoStatus = await Permission.photos.request();
@@ -154,14 +149,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         AppLogger.info('Photo permission: $photoStatus');
         storagePermissionGranted = photoStatus.isGranted;
 
-        // Optionally check audio permission for voice notes
         PermissionStatus audioStatus = await Permission.audio.status;
         if (!audioStatus.isGranted) {
           audioStatus = await Permission.audio.request();
         }
         AppLogger.info('Audio permission: $audioStatus');
       } else {
-        // Android 12 and below: Use legacy storage permissions
         PermissionStatus readStorageStatus = await Permission.storage.status;
         if (!readStorageStatus.isGranted) {
           readStorageStatus = await Permission.storage.request();
@@ -170,7 +163,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         storagePermissionGranted = readStorageStatus.isGranted;
       }
     } else {
-      // iOS or other platforms
       PermissionStatus storageStatus = await Permission.storage.status;
       if (!storageStatus.isGranted) {
         storageStatus = await Permission.storage.request();
@@ -183,7 +175,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       _hasMicPermission = micStatus.isGranted;
     });
 
-    // Determine which permissions are missing
     List<String> missingPermissions = [];
     if (!micStatus.isGranted) {
       missingPermissions.add('microphone');
@@ -202,7 +193,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         await _initializeAudio();
       }
 
-      // Test writing to the directory to confirm storage access
       final directory = await getDownloadDirectory();
       final testFile = File('$directory/test.txt');
       try {
@@ -211,7 +201,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         await testFile.delete();
       } catch (e) {
         AppLogger.error('Failed to write to $directory/test.txt', e);
-        // If writing fails, it might indicate a permission issue
         missingPermissions.add('storage');
         _showPermissionDialog(['storage']);
       }
@@ -311,10 +300,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     socket.on('messageSent', (data) {
       AppLogger.debug('ChatScreen: Message sent confirmation: $data');
       setState(() {
-        // Find the message in the list by matching a temporary ID
         final messageIndex = _messages.indexWhere((msg) => msg['tempId'] == data['tempId']);
         if (messageIndex != -1) {
-          // Update the existing message with server data (e.g., _id, deliveredAt)
           _messages[messageIndex] = {
             ..._messages[messageIndex],
             '_id': data['_id']?.toString(),
@@ -323,7 +310,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             'seenAt': data['seenAt']?.toString(),
           };
         } else {
-          // If the message isn't found (unlikely), add it
           _messages.add(data);
         }
         _scrollToBottom();
@@ -475,9 +461,62 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         final data = jsonDecode(response.body);
         AppLogger.info('Chat history data: $data');
         if (data['success']) {
+          final List<Map<String, dynamic>> fetchedMessages = List<Map<String, dynamic>>.from(data['messages']);
+          
+          // Process each message to ensure localFilePath is set for images and voice notes
+          for (var message in fetchedMessages) {
+            if (message['isImage'] == true) {
+              final imageId = message['imageId']?.toString() ?? message['_id']?.toString();
+              if (imageId != null) {
+                final directory = await getDownloadDirectory();
+                final filePath = '$directory/image_$imageId.jpg';
+                final file = File(filePath);
+
+                // Check if the image file already exists
+                if (await file.exists()) {
+                  message['localFilePath'] = filePath;
+                } else if (message['imageData'] != null) {
+                  // If the server provides imageData, save it to the local file system
+                  final bytes = base64Decode(message['imageData']);
+                  await file.writeAsBytes(bytes);
+                  if (await file.exists()) {
+                    message['localFilePath'] = filePath;
+                    AppLogger.info('Image re-saved successfully at: $filePath');
+                  } else {
+                    AppLogger.error('Failed to re-save image at: $filePath');
+                  }
+                } else {
+                  AppLogger.warning('Image file not found and no imageData provided for imageId: $imageId');
+                }
+              }
+            } else if (message['isVoice'] == true) {
+              final voiceId = message['voiceId']?.toString() ?? message['_id']?.toString();
+              if (voiceId != null) {
+                final directory = await getDownloadDirectory();
+                final filePath = '$directory/voice_$voiceId.aac';
+                final file = File(filePath);
+
+                if (await file.exists()) {
+                  message['localFilePath'] = filePath;
+                } else if (message['voiceData'] != null) {
+                  final bytes = base64Decode(message['voiceData']);
+                  await file.writeAsBytes(bytes);
+                  if (await file.exists()) {
+                    message['localFilePath'] = filePath;
+                    AppLogger.info('Voice note re-saved successfully at: $filePath');
+                  } else {
+                    AppLogger.error('Failed to re-save voice note at: $filePath');
+                  }
+                } else {
+                  AppLogger.warning('Voice file not found and no voiceData provided for voiceId: $voiceId');
+                }
+              }
+            }
+          }
+
           setState(() {
             _messages.clear();
-            _messages.addAll(List<Map<String, dynamic>>.from(data['messages']));
+            _messages.addAll(fetchedMessages);
             AppLogger.info('Messages fetched: ${_messages.length}');
             _scrollToBottom();
           });
@@ -566,7 +605,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
       final voiceId = _recordedAudioPath!.split('voice_').last.replaceAll('.aac', '');
 
-      final tempId = const Uuid().v4(); // Temporary ID for matching
+      final tempId = const Uuid().v4();
       final message = {
         'receiverId': widget.receiverId,
         'content': 'Voice message',
@@ -577,7 +616,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         'localFilePath': _recordedAudioPath,
         'sender': _currentUserId,
         'timestamp': DateTime.now().toIso8601String(),
-        'tempId': tempId, // Add temporary ID
+        'tempId': tempId,
       };
 
       setState(() {
@@ -610,7 +649,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _sendImage() async {
-    // Check permissions before proceeding
     PermissionStatus photoStatus = await Permission.photos.status;
     if (!photoStatus.isGranted) {
       await _checkAndRequestPermissions();
@@ -640,7 +678,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       final bytes = await file.readAsBytes();
       final imageData = base64Encode(bytes);
 
-      final tempId = const Uuid().v4(); // Temporary ID for matching
+      final tempId = const Uuid().v4();
       final message = {
         'receiverId': widget.receiverId,
         'content': 'Image',
@@ -650,10 +688,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         'localFilePath': filePath,
         'sender': _currentUserId,
         'timestamp': DateTime.now().toIso8601String(),
-        'tempId': tempId, // Add temporary ID
+        'tempId': tempId,
       };
 
-      // Add the message to the list immediately with the local file path
       setState(() {
         _messages.add({
           'tempId': tempId,
@@ -684,14 +721,14 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
     if (_messageController.text.isEmpty) return;
 
-    final tempId = const Uuid().v4(); // Temporary ID for matching
+    final tempId = const Uuid().v4();
     final message = {
       'receiverId': widget.receiverId,
       'content': _messageController.text,
       'isVoice': false,
       'sender': _currentUserId,
       'timestamp': DateTime.now().toIso8601String(),
-      'tempId': tempId, // Add temporary ID
+      'tempId': tempId,
     };
 
     setState(() {
