@@ -114,7 +114,7 @@ const sendEmailOtp = [
       const mailOptions = {
         from: process.env.EMAIL_USER,
         to: email,
-        subject: 'ConvoFlow Registration OTP',
+        subject: 'Talki-i Registration OTP',
         text: `Your OTP for ConvoFlow registration is: ${otp}. It is valid for 5 minutes.`,
       };
 
