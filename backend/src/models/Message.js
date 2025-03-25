@@ -9,6 +9,9 @@ const messageSchema = new mongoose.Schema({
   seen: { type: Boolean, default: false },
   deliveredAt: { type: Date }, // New field for delivery timestamp
   seenAt: { type: Date }, // New field for seen timestamp
+  isVoice: { type: Boolean, default: false },
+  voiceDuration: { type: Number,default:null }, // Duration in seconds
+  voiceId: {type: String,default: null},
 });
 
 module.exports = mongoose.model('Message', messageSchema);

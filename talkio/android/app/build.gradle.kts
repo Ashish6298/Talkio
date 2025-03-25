@@ -20,7 +20,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.talkio_frontend"
-        minSdk = 21 // Minimum supported by Flutter
+        minSdk = 24 // Minimum supported by Flutter
         targetSdk = 34 // Target Android 14
         versionCode = flutter.versionCode
         versionName = flutter.versionName
