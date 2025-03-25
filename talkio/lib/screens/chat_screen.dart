@@ -9,6 +9,8 @@ import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 
 // Logger setup
 class AppLogger {
@@ -66,13 +68,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   String? _recordedAudioPath;
   int? _recordedDuration;
   DateTime? _recordingStartTime;
-
-  // State for tracking playing voice messages
   String? _currentlyPlayingVoiceId;
   AnimationController? _pulseAnimationController;
   Animation<double>? _pulseAnimation;
+  final ImagePicker _picker = ImagePicker();
 
-  static const String baseUrl = 'http://10.0.2.2:5000'; // For emulator; replace with your local IP for physical device
+  static const String baseUrl = 'http://10.0.2.2:5000'; // Update for physical device if needed
 
   @override
   void initState() {
@@ -112,11 +113,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   Future<String> getDownloadDirectory() async {
     Directory? directory;
     if (Platform.isAndroid) {
-      directory = Directory('/storage/emulated/0/Download/Talkio');
+      // Use app-specific external storage directory to avoid broad storage permissions
+      directory = await getExternalStorageDirectory();
+      directory = Directory('${directory?.path}/Talkio');
     } else {
       directory = await getApplicationDocumentsDirectory();
+      directory = Directory('${directory.path}/Talkio');
     }
-
     if (!(await directory.exists())) {
       await directory.create(recursive: true);
     }
@@ -125,34 +128,112 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   Future<void> _checkAndRequestPermissions() async {
     AppLogger.info('Checking and requesting permissions...');
-    PermissionStatus micStatus = await Permission.microphone.request();
+
+    // Check microphone permission
+    PermissionStatus micStatus = await Permission.microphone.status;
+    if (!micStatus.isGranted) {
+      micStatus = await Permission.microphone.request();
+    }
+
+    // Check storage permission
+    PermissionStatus storageStatus;
+    bool storagePermissionGranted = false;
+
+    if (Platform.isAndroid) {
+      final androidInfo = await DeviceInfoPlugin().androidInfo;
+      final sdkInt = androidInfo.version.sdkInt;
+      AppLogger.info('Android SDK version: $sdkInt');
+
+      if (sdkInt >= 33) {
+        // Android 13 and above: Use granular media permissions
+        // For images, we only need Permission.photos
+        PermissionStatus photoStatus = await Permission.photos.status;
+        if (!photoStatus.isGranted) {
+          photoStatus = await Permission.photos.request();
+        }
+        AppLogger.info('Photo permission: $photoStatus');
+        storagePermissionGranted = photoStatus.isGranted;
+
+        // Optionally check audio permission for voice notes
+        PermissionStatus audioStatus = await Permission.audio.status;
+        if (!audioStatus.isGranted) {
+          audioStatus = await Permission.audio.request();
+        }
+        AppLogger.info('Audio permission: $audioStatus');
+      } else {
+        // Android 12 and below: Use legacy storage permissions
+        PermissionStatus readStorageStatus = await Permission.storage.status;
+        if (!readStorageStatus.isGranted) {
+          readStorageStatus = await Permission.storage.request();
+        }
+        AppLogger.info('Legacy storage permission: $readStorageStatus');
+        storagePermissionGranted = readStorageStatus.isGranted;
+      }
+    } else {
+      // iOS or other platforms
+      PermissionStatus storageStatus = await Permission.storage.status;
+      if (!storageStatus.isGranted) {
+        storageStatus = await Permission.storage.request();
+      }
+      AppLogger.info('Storage permission (non-Android): $storageStatus');
+      storagePermissionGranted = storageStatus.isGranted;
+    }
+
     setState(() {
       _hasMicPermission = micStatus.isGranted;
     });
 
-    if (_hasMicPermission) {
-      AppLogger.info('Microphone permission granted, initializing audio');
-      await _initializeAudio();
-    } else {
-      AppLogger.error('Microphone permission not granted');
-      _showPermissionDialog();
+    // Determine which permissions are missing
+    List<String> missingPermissions = [];
+    if (!micStatus.isGranted) {
+      missingPermissions.add('microphone');
+    }
+    if (!storagePermissionGranted) {
+      missingPermissions.add('storage');
     }
 
-    if (Platform.isAndroid) {
-      PermissionStatus storageStatus = await Permission.storage.request();
-      if (!storageStatus.isGranted) {
-        AppLogger.warning('Storage permission not granted');
+    if (missingPermissions.isNotEmpty) {
+      AppLogger.warning('Missing permissions: $missingPermissions');
+      _showPermissionDialog(missingPermissions);
+    } else {
+      AppLogger.info('All required permissions are granted');
+      if (_hasMicPermission) {
+        AppLogger.info('Microphone permission granted, initializing audio');
+        await _initializeAudio();
+      }
+
+      // Test writing to the directory to confirm storage access
+      final directory = await getDownloadDirectory();
+      final testFile = File('$directory/test.txt');
+      try {
+        await testFile.writeAsString('Test');
+        AppLogger.info('Successfully wrote to $directory/test.txt');
+        await testFile.delete();
+      } catch (e) {
+        AppLogger.error('Failed to write to $directory/test.txt', e);
+        // If writing fails, it might indicate a permission issue
+        missingPermissions.add('storage');
+        _showPermissionDialog(['storage']);
       }
     }
   }
 
-  void _showPermissionDialog() {
+  void _showPermissionDialog(List<String> missingPermissions) {
+    String message;
+    if (missingPermissions.contains('microphone') && missingPermissions.contains('storage')) {
+      message = 'This app needs microphone and storage permissions for voice and image features. Please enable them in settings.';
+    } else if (missingPermissions.contains('microphone')) {
+      message = 'This app needs microphone permission for voice features. Please enable it in settings.';
+    } else {
+      message = 'This app needs storage permission for image features. Please enable it in settings.';
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: const Text('Permissions Required'),
-        content: const Text('This app needs microphone permission to record voice messages. Please enable it in settings.'),
+        content: Text(message),
         actions: [
           TextButton(
             onPressed: () async {
@@ -216,13 +297,35 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       AppLogger.info('ChatScreen: Connected to Socket.IO at $baseUrl (User: $_currentUserId)');
     });
 
+    socket.onConnectError((error) {
+      AppLogger.error('Socket connection error: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Socket connection error: $error')),
+      );
+    });
+
+    socket.onDisconnect((_) {
+      AppLogger.warning('ChatScreen: Disconnected from Socket.IO');
+    });
+
     socket.on('messageSent', (data) {
       AppLogger.debug('ChatScreen: Message sent confirmation: $data');
       setState(() {
-        if (data['isVoice'] == true && data['localFilePath'] != null) {
-          AppLogger.info('Voice message sent with localFilePath: ${data['localFilePath']}');
+        // Find the message in the list by matching a temporary ID
+        final messageIndex = _messages.indexWhere((msg) => msg['tempId'] == data['tempId']);
+        if (messageIndex != -1) {
+          // Update the existing message with server data (e.g., _id, deliveredAt)
+          _messages[messageIndex] = {
+            ..._messages[messageIndex],
+            '_id': data['_id']?.toString(),
+            'deliveredAt': data['deliveredAt']?.toString(),
+            'seen': data['seen'] ?? false,
+            'seenAt': data['seenAt']?.toString(),
+          };
+        } else {
+          // If the message isn't found (unlikely), add it
+          _messages.add(data);
         }
-        _messages.add(data);
         _scrollToBottom();
       });
     });
@@ -239,10 +342,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
     socket.on('voiceNoteData', (data) async {
       AppLogger.info('Received voiceNoteData: $data');
-      final voiceId = data['voiceId'] ?? data['messageId'];
-      final voiceData = data['voiceData'];
+      final voiceId = data['voiceId']?.toString() ?? data['messageId']?.toString();
+      final voiceData = data['voiceData']?.toString();
       final voiceDuration = data['voiceDuration'];
-      final messageId = data['messageId'];
+      final messageId = data['messageId']?.toString();
+
+      if (voiceId == null || voiceData == null || messageId == null) {
+        AppLogger.error('Missing required fields in voiceNoteData: $data');
+        return;
+      }
 
       final directory = await getDownloadDirectory();
       final filePath = '$directory/voice_$voiceId.aac';
@@ -258,13 +366,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       }
 
       setState(() {
-        final messageIndex = _messages.indexWhere((msg) => msg['_id'] == messageId);
+        final messageIndex = _messages.indexWhere((msg) => msg['_id']?.toString() == messageId);
         if (messageIndex != -1) {
           _messages[messageIndex]['localFilePath'] = filePath;
           _messages[messageIndex]['voiceId'] = voiceId;
-          AppLogger.info('Updated message with localFilePath: $filePath and voiceId: $voiceId');
         } else {
-          AppLogger.warning('Message with ID $messageId not found in _messages');
           _messages.add({
             '_id': messageId,
             'isVoice': true,
@@ -280,13 +386,56 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       });
     });
 
-    // Added socket events for message delivered and seen
+    socket.on('imageData', (data) async {
+      AppLogger.info('Received imageData: $data');
+      final imageId = data['imageId']?.toString() ?? data['messageId']?.toString();
+      final imageData = data['imageData']?.toString();
+      final messageId = data['messageId']?.toString();
+
+      if (imageId == null || imageData == null || messageId == null) {
+        AppLogger.error('Missing required fields in imageData: $data');
+        return;
+      }
+
+      final directory = await getDownloadDirectory();
+      final filePath = '$directory/image_$imageId.jpg';
+      final file = File(filePath);
+      final bytes = base64Decode(imageData);
+      await file.writeAsBytes(bytes);
+
+      if (await file.exists()) {
+        AppLogger.info('Image saved successfully at: $filePath');
+      } else {
+        AppLogger.error('Failed to save image at: $filePath');
+        return;
+      }
+
+      setState(() {
+        final messageIndex = _messages.indexWhere((msg) => msg['_id']?.toString() == messageId);
+        if (messageIndex != -1) {
+          _messages[messageIndex]['localFilePath'] = filePath;
+          _messages[messageIndex]['imageId'] = imageId;
+        } else {
+          _messages.add({
+            '_id': messageId,
+            'isImage': true,
+            'localFilePath': filePath,
+            'imageId': imageId,
+            'sender': widget.receiverId,
+            'receiver': _currentUserId,
+            'timestamp': DateTime.now().toIso8601String(),
+          });
+          _scrollToBottom();
+        }
+      });
+    });
+
     socket.on('messageDelivered', (data) {
       AppLogger.info('Message delivered: $data');
       setState(() {
-        final messageIndex = _messages.indexWhere((msg) => msg['_id'] == data['messageId']);
+        final messageIndex = _messages.indexWhere((msg) => msg['_id']?.toString() == data['messageId']?.toString());
         if (messageIndex != -1) {
-          _messages[messageIndex]['deliveredAt'] = data['deliveredAt'];
+          _messages[messageIndex]['deliveredAt'] = data['deliveredAt']?.toString();
         }
       });
     });
@@ -294,10 +443,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     socket.on('messageSeen', (data) {
       AppLogger.info('Message seen: $data');
       setState(() {
-        final messageIndex = _messages.indexWhere((msg) => msg['_id'] == data['messageId']);
+        final messageIndex = _messages.indexWhere((msg) => msg['_id']?.toString() == data['messageId']?.toString());
         if (messageIndex != -1) {
           _messages[messageIndex]['seen'] = true;
-          _messages[messageIndex]['seenAt'] = data['seenAt'];
+          _messages[messageIndex]['seenAt'] = data['seenAt']?.toString();
         }
       });
     });
@@ -305,31 +454,49 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     socket.on('error', (error) {
       AppLogger.error('ChatScreen: Socket error: $error');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error['error'] ?? 'An error occurred')),
+        SnackBar(content: Text(error['error']?.toString() ?? 'An error occurred')),
       );
     });
   }
 
   Future<void> _fetchChatHistory() async {
     final url = Uri.parse('$baseUrl/api/messages/${widget.receiverId}');
-    final response = await http.get(
-      url,
-      headers: {'Authorization': 'Bearer ${widget.token}'},
-    );
+    AppLogger.info('Fetching chat history for receiverId: ${widget.receiverId}');
+    try {
+      final response = await http.get(
+        url,
+        headers: {'Authorization': 'Bearer ${widget.token}'},
+      );
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      if (data['success']) {
-        setState(() {
-          _messages.clear();
-          _messages.addAll(List<Map<String, dynamic>>.from(data['messages']));
-          _scrollToBottom();
-        });
+      AppLogger.info('Chat history response status: ${response.statusCode}');
+      AppLogger.info('Chat history response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        AppLogger.info('Chat history data: $data');
+        if (data['success']) {
+          setState(() {
+            _messages.clear();
+            _messages.addAll(List<Map<String, dynamic>>.from(data['messages']));
+            AppLogger.info('Messages fetched: ${_messages.length}');
+            _scrollToBottom();
+          });
+        } else {
+          AppLogger.warning('Chat history fetch failed: ${data['message']}');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to fetch chat history: ${data['message']}')),
+          );
+        }
+      } else {
+        AppLogger.error('Failed to fetch chat history: ${response.statusCode} - ${response.body}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to fetch chat history: ${response.statusCode}')),
+        );
       }
-    } else {
-      AppLogger.error('Failed to fetch chat history: ${response.body}');
+    } catch (e) {
+      AppLogger.error('Error fetching chat history', e);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to fetch chat history')),
+        const SnackBar(content: Text('Error fetching chat history')),
       );
     }
   }
@@ -340,7 +507,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   Future<void> _startRecording() async {
     if (!_hasMicPermission) {
-      _showPermissionDialog();
+      await _checkAndRequestPermissions();
       return;
     }
 
@@ -377,11 +544,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to start recording')),
       );
-      setState(() {
-        _isRecording = false;
-        _recordedAudioPath = null;
-        _recordingStartTime = null;
-      });
     }
   }
 
@@ -398,22 +560,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         _recordedDuration = duration;
       });
 
-      if (await File(path!).exists()) {
-        AppLogger.info('Recorded file exists at: $path');
-      } else {
-        AppLogger.error('Recorded file does not exist at: $path');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to save voice message')),
-        );
-        return;
-      }
-
       final file = File(_recordedAudioPath!);
       final bytes = await file.readAsBytes();
       final voiceData = base64Encode(bytes);
 
       final voiceId = _recordedAudioPath!.split('voice_').last.replaceAll('.aac', '');
 
+      final tempId = const Uuid().v4(); // Temporary ID for matching
       final message = {
         'receiverId': widget.receiverId,
         'content': 'Voice message',
@@ -424,9 +577,23 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         'localFilePath': _recordedAudioPath,
         'sender': _currentUserId,
         'timestamp': DateTime.now().toIso8601String(),
+        'tempId': tempId, // Add temporary ID
       };
 
-      AppLogger.debug('ChatScreen: Sending voice message: $message');
+      setState(() {
+        _messages.add({
+          'tempId': tempId,
+          'content': 'Voice message',
+          'isVoice': true,
+          'voiceDuration': duration,
+          'localFilePath': _recordedAudioPath,
+          'voiceId': voiceId,
+          'sender': _currentUserId,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+        _scrollToBottom();
+      });
+
       socket.emit('sendMessage', message);
 
       setState(() {
@@ -439,12 +606,73 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to send voice message')),
       );
+    }
+  }
+
+  Future<void> _sendImage() async {
+    // Check permissions before proceeding
+    PermissionStatus photoStatus = await Permission.photos.status;
+    if (!photoStatus.isGranted) {
+      await _checkAndRequestPermissions();
+      photoStatus = await Permission.photos.status;
+      if (!photoStatus.isGranted) {
+        return;
+      }
+    }
+
+    try {
+      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+      if (image == null) return;
+
+      final directory = await getDownloadDirectory();
+      final imageId = const Uuid().v4();
+      final filePath = '$directory/image_$imageId.jpg';
+      final file = File(filePath);
+      await file.writeAsBytes(await image.readAsBytes());
+
+      if (await file.exists()) {
+        AppLogger.info('Image saved successfully at: $filePath');
+      } else {
+        AppLogger.error('Failed to save image at: $filePath');
+        return;
+      }
+
+      final bytes = await file.readAsBytes();
+      final imageData = base64Encode(bytes);
+
+      final tempId = const Uuid().v4(); // Temporary ID for matching
+      final message = {
+        'receiverId': widget.receiverId,
+        'content': 'Image',
+        'isImage': true,
+        'imageData': imageData,
+        'imageId': imageId,
+        'localFilePath': filePath,
+        'sender': _currentUserId,
+        'timestamp': DateTime.now().toIso8601String(),
+        'tempId': tempId, // Add temporary ID
+      };
+
+      // Add the message to the list immediately with the local file path
       setState(() {
-        _isRecording = false;
-        _recordedAudioPath = null;
-        _recordedDuration = null;
-        _recordingStartTime = null;
+        _messages.add({
+          'tempId': tempId,
+          'content': 'Image',
+          'isImage': true,
+          'localFilePath': filePath,
+          'imageId': imageId,
+          'sender': _currentUserId,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+        _scrollToBottom();
       });
+
+      socket.emit('sendMessage', message);
+    } catch (e) {
+      AppLogger.error('Error sending image', e);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to send image')),
+      );
     }
   }
 
@@ -456,18 +684,29 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
     if (_messageController.text.isEmpty) return;
 
+    final tempId = const Uuid().v4(); // Temporary ID for matching
     final message = {
       'receiverId': widget.receiverId,
       'content': _messageController.text,
       'isVoice': false,
       'sender': _currentUserId,
       'timestamp': DateTime.now().toIso8601String(),
+      'tempId': tempId, // Add temporary ID
     };
 
-    socket.emit('sendMessage', message);
     setState(() {
+      _messages.add({
+        'tempId': tempId,
+        'content': _messageController.text,
+        'isVoice': false,
+        'sender': _currentUserId,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+      _scrollToBottom();
       _messageController.clear();
     });
+
+    socket.emit('sendMessage', message);
   }
 
   Future<void> _playVoiceMessage(String? voiceId, String? localFilePath) async {
@@ -502,20 +741,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       return;
     }
 
-    String? filePath;
-
-    if (localFilePath != null && await File(localFilePath).exists()) {
-      filePath = localFilePath;
-      AppLogger.info('Using localFilePath for playback: $filePath');
-    } else {
-      final directory = await getDownloadDirectory();
-      filePath = '$directory/voice_$voiceId.aac';
-      AppLogger.info('Constructed file path for playback: $filePath');
-    }
+    String? filePath = localFilePath ?? '${await getDownloadDirectory()}/voice_$voiceId.aac';
 
     try {
       if (await File(filePath).exists()) {
-        AppLogger.info('Playing voice message from: $filePath');
         setState(() {
           _currentlyPlayingVoiceId = voiceId;
         });
@@ -525,7 +754,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         await _player!.startPlayer(
           fromURI: filePath,
           whenFinished: () {
-            AppLogger.info('Voice message playback finished');
             setState(() {
               _currentlyPlayingVoiceId = null;
             });
@@ -545,12 +773,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to play voice message: $e')),
       );
-      setState(() {
-        _currentlyPlayingVoiceId = null;
-      });
-      if (_pulseAnimationController != null && _pulseAnimationController!.isAnimating) {
-        _pulseAnimationController!.stop();
-      }
     }
   }
 
@@ -580,13 +802,13 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  String _formatTimestamp(String utcTimestamp) {
+  String _formatTimestamp(String? utcTimestamp) {
+    if (utcTimestamp == null) return '';
     final utcDateTime = DateTime.parse(utcTimestamp);
     final istDateTime = utcDateTime.add(const Duration(hours: 5, minutes: 30));
     return '${istDateTime.hour.toString().padLeft(2, '0')}:${istDateTime.minute.toString().padLeft(2, '0')}';
   }
 
-  // Added method for formatting timestamp in dialog
   String _formatTimestampForDialog(String? utcTimestamp) {
     if (utcTimestamp == null) return 'N/A';
     final utcDateTime = DateTime.parse(utcTimestamp);
@@ -594,9 +816,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     return '${istDateTime.day}/${istDateTime.month}/${istDateTime.year} ${istDateTime.hour.toString().padLeft(2, '0')}:${istDateTime.minute.toString().padLeft(2, '0')}';
   }
 
-  // Added method to show message info popup
   void _showMessageInfo(Map<String, dynamic> message) {
-    final isSentByMe = message['sender'] == _currentUserId;
+    final isSentByMe = message['sender']?.toString() == _currentUserId;
     if (!isSentByMe) return;
 
     showDialog(
@@ -613,11 +834,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Delivered: ${_formatTimestampForDialog(message['deliveredAt'])}',
+              'Delivered: ${_formatTimestampForDialog(message['deliveredAt']?.toString())}',
               style: const TextStyle(color: Colors.black54),
             ),
             Text(
-              'Seen: ${_formatTimestampForDialog(message['seenAt'])}',
+              'Seen: ${_formatTimestampForDialog(message['seenAt']?.toString())}',
               style: const TextStyle(color: Colors.black54),
             ),
           ],
@@ -711,15 +932,16 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   itemCount: _messages.length,
                   itemBuilder: (context, index) {
                     final message = _messages[index];
-                    final isSentByMe = message['sender'] == _currentUserId;
+                    final isSentByMe = message['sender']?.toString() == _currentUserId;
                     final username = isSentByMe ? 'You' : widget.receiverUsername;
-                    final voiceId = message['voiceId'] as String? ?? message['_id'] as String?;
+                    final voiceId = message['voiceId']?.toString() ?? message['_id']?.toString();
                     final isPlaying = _currentlyPlayingVoiceId == voiceId;
+                    final localFilePath = message['localFilePath']?.toString();
 
                     return FadeTransition(
                       opacity: _fadeAnimation,
                       child: GestureDetector(
-                        onLongPress: () => _showMessageInfo(message), // Added long press for message info
+                        onLongPress: () => _showMessageInfo(message),
                         child: Row(
                           mainAxisAlignment: isSentByMe ? MainAxisAlignment.end : MainAxisAlignment.start,
                           children: [
@@ -769,43 +991,68 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                                       ),
                                     ),
                                     const SizedBox(height: 5),
-                                    if (message['isVoice'] == true)
-                                      GestureDetector(
-                                        onTap: () {
-                                          if (voiceId != null) {
-                                            _playVoiceMessage(
-                                              voiceId,
-                                              message['localFilePath'] as String?,
-                                            );
-                                          } else {
-                                            AppLogger.error('No voiceId or messageId found for voice message');
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(content: Text('Cannot play voice message: Missing ID')),
-                                            );
-                                          }
-                                        },
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            _pulseAnimation != null
-                                                ? ScaleTransition(
-                                                    scale: isPlaying ? _pulseAnimation! : const AlwaysStoppedAnimation(1.0),
-                                                    child: Icon(
-                                                      isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                                                      color: Colors.cyanAccent,
-                                                    ),
-                                                  )
-                                                : Icon(
-                                                    isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                                                    color: Colors.cyanAccent,
-                                                  ),
+                                    if (message['isVoice'] == true && voiceId != null)
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          GestureDetector(
+                                            onTap: () => _playVoiceMessage(voiceId, localFilePath),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                _pulseAnimation != null
+                                                    ? ScaleTransition(
+                                                        scale: isPlaying ? _pulseAnimation! : const AlwaysStoppedAnimation(1.0),
+                                                        child: Icon(
+                                                          isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                                                          color: Colors.cyanAccent,
+                                                        ),
+                                                      )
+                                                    : Icon(
+                                                        isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                                                        color: Colors.cyanAccent,
+                                                      ),
+                                                const SizedBox(width: 5),
+                                                Text(
+                                                  '${message['voiceDuration']?.toString() ?? '0'}s',
+                                                  style: const TextStyle(fontSize: 16, color: Colors.white),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          if (isSentByMe) ...[
                                             const SizedBox(width: 5),
-                                            Text(
-                                              '${message['voiceDuration']}s',
-                                              style: const TextStyle(fontSize: 16, color: Colors.white),
+                                            Icon(
+                                              Icons.done_all,
+                                              size: 16,
+                                              color: message['seen'] == true ? Colors.cyanAccent : Colors.grey,
                                             ),
                                           ],
-                                        ),
+                                        ],
+                                      )
+                                    else if (message['isImage'] == true && localFilePath != null)
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Image.file(
+                                            File(localFilePath),
+                                            width: 200,
+                                            height: 200,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (context, error, stackTrace) => const Text(
+                                              'Failed to load image',
+                                              style: TextStyle(color: Colors.red),
+                                            ),
+                                          ),
+                                          if (isSentByMe) ...[
+                                            const SizedBox(width: 5),
+                                            Icon(
+                                              Icons.done_all,
+                                              size: 16,
+                                              color: message['seen'] == true ? Colors.cyanAccent : Colors.grey,
+                                            ),
+                                          ],
+                                        ],
                                       )
                                     else
                                       Row(
@@ -813,7 +1060,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                                         children: [
                                           Flexible(
                                             child: Text(
-                                              message['content'],
+                                              message['content']?.toString() ?? '',
                                               style: const TextStyle(fontSize: 16, color: Colors.white),
                                             ),
                                           ),
@@ -832,7 +1079,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(
-                                          _formatTimestamp(message['timestamp']),
+                                          _formatTimestamp(message['timestamp']?.toString()),
                                           style: const TextStyle(fontSize: 10, color: Colors.white70),
                                         ),
                                         if (isSentByMe && message['seen'] == true) ...[
@@ -893,11 +1140,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                                 ),
                               ),
                               IconButton(
-                                icon: Icon(
-                                  Icons.mic,
-                                  color: _isRecording ? Colors.grey : Colors.cyanAccent,
-                                ),
+                                icon: const Icon(Icons.mic, color: Colors.cyanAccent),
                                 onPressed: _isRecording ? null : _startRecording,
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.image, color: Colors.cyanAccent),
+                                onPressed: _sendImage,
                               ),
                             ],
                           ),
@@ -935,6 +1183,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     if (parts.length != 3) return null;
     final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
     final decoded = jsonDecode(payload);
-    return decoded['id'];
+    return decoded['id']?.toString();
   }
 }

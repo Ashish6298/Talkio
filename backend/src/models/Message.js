@@ -12,6 +12,8 @@ const messageSchema = new mongoose.Schema({
   isVoice: { type: Boolean, default: false },
   voiceDuration: { type: Number,default:null }, // Duration in seconds
   voiceId: {type: String,default: null},
+  isImage: { type: Boolean, default: false }, // New field for images
+  imageId: { type: String, default: null }, // New field for image ID
 });
 
 module.exports = mongoose.model('Message', messageSchema);

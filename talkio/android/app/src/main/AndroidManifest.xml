@@ -2,8 +2,18 @@
     <!-- Permissions -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
+    
+    <!-- Granular media permissions for Android 13+ (API 33 and above) -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+
+    <!-- Legacy storage permissions for Android 12 and below (API 32 and below) -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+    <!-- Optional: If you need to access media location metadata -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
 
     <application
         android:label="Talkio"
@@ -37,6 +47,7 @@
             android:name="flutterEmbedding"
             android:value="2" />
     </application>
+
     <!-- Required to query activities that can process text -->
     <queries>
         <intent>
@@ -47,6 +58,11 @@
         <intent>
             <action android:name="android.intent.action.PICK"/>
             <data android:mimeType="image/*"/>
+        </intent>
+        <!-- Add this to allow audio picking (if needed) -->
+        <intent>
+            <action android:name="android.intent.action.PICK"/>
+            <data android:mimeType="audio/*"/>
         </intent>
     </queries>
 </manifest>
