@@ -1,5 +1,3 @@
-
-
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -50,7 +48,7 @@ class ChatScreen extends StatefulWidget {
   _ChatScreenState createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin { // Changed to TickerProviderStateMixin
+class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   late io.Socket socket;
   final _messageController = TextEditingController();
   final List<Map<String, dynamic>> _messages = [];
@@ -70,7 +68,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   DateTime? _recordingStartTime;
 
   // State for tracking playing voice messages
-  String? _currentlyPlayingVoiceId; // Tracks the voiceId of the currently playing voice note
+  String? _currentlyPlayingVoiceId;
   AnimationController? _pulseAnimationController;
   Animation<double>? _pulseAnimation;
 
@@ -94,7 +92,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       CurvedAnimation(parent: _animationController, curve: Curves.easeOutBack),
     );
 
-    // Initialize the pulse animation for playing voice notes
     _pulseAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
@@ -106,7 +103,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
     _animationController.forward();
 
-    // Connect socket and fetch data after initialization
     _connectSocket();
     _fetchChatHistory();
     _markMessagesAsSeen();
@@ -138,11 +134,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       AppLogger.info('Microphone permission granted, initializing audio');
       await _initializeAudio();
     } else {
-      AppLogger.warning('Microphone permission not granted');
+      AppLogger.error('Microphone permission not granted');
       _showPermissionDialog();
     }
 
-    // Request storage permissions for Android (needed for /storage/emulated/0)
     if (Platform.isAndroid) {
       PermissionStatus storageStatus = await Permission.storage.request();
       if (!storageStatus.isGranted) {
@@ -249,7 +244,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       final voiceDuration = data['voiceDuration'];
       final messageId = data['messageId'];
 
-      // Save the voice note locally in the Talkio directory with .aac extension
       final directory = await getDownloadDirectory();
       final filePath = '$directory/voice_$voiceId.aac';
       final file = File(filePath);
@@ -263,7 +257,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         return;
       }
 
-      // Update the message with the local file path and voiceId
       setState(() {
         final messageIndex = _messages.indexWhere((msg) => msg['_id'] == messageId);
         if (messageIndex != -1) {
@@ -283,6 +276,28 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             'timestamp': DateTime.now().toIso8601String(),
           });
           _scrollToBottom();
+        }
+      });
+    });
+
+    // Added socket events for message delivered and seen
+    socket.on('messageDelivered', (data) {
+      AppLogger.info('Message delivered: $data');
+      setState(() {
+        final messageIndex = _messages.indexWhere((msg) => msg['_id'] == data['messageId']);
+        if (messageIndex != -1) {
+          _messages[messageIndex]['deliveredAt'] = data['deliveredAt'];
+        }
+      });
+    });
+
+    socket.on('messageSeen', (data) {
+      AppLogger.info('Message seen: $data');
+      setState(() {
+        final messageIndex = _messages.indexWhere((msg) => msg['_id'] == data['messageId']);
+        if (messageIndex != -1) {
+          _messages[messageIndex]['seen'] = true;
+          _messages[messageIndex]['seenAt'] = data['seenAt'];
         }
       });
     });
@@ -466,7 +481,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       return;
     }
 
-    // If another voice note is playing, stop it
     if (_currentlyPlayingVoiceId != null && _currentlyPlayingVoiceId != voiceId) {
       await _player!.stopPlayer();
       setState(() {
@@ -477,7 +491,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       }
     }
 
-    // If the same voice note is playing, pause it
     if (_currentlyPlayingVoiceId == voiceId) {
       await _player!.stopPlayer();
       setState(() {
@@ -507,7 +520,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           _currentlyPlayingVoiceId = voiceId;
         });
         if (_pulseAnimationController != null) {
-          _pulseAnimationController!.repeat(reverse: true); // Start the pulsing animation
+          _pulseAnimationController!.repeat(reverse: true);
         }
         await _player!.startPlayer(
           fromURI: filePath,
@@ -573,6 +586,55 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     return '${istDateTime.hour.toString().padLeft(2, '0')}:${istDateTime.minute.toString().padLeft(2, '0')}';
   }
 
+  // Added method for formatting timestamp in dialog
+  String _formatTimestampForDialog(String? utcTimestamp) {
+    if (utcTimestamp == null) return 'N/A';
+    final utcDateTime = DateTime.parse(utcTimestamp);
+    final istDateTime = utcDateTime.add(const Duration(hours: 5, minutes: 30));
+    return '${istDateTime.day}/${istDateTime.month}/${istDateTime.year} ${istDateTime.hour.toString().padLeft(2, '0')}:${istDateTime.minute.toString().padLeft(2, '0')}';
+  }
+
+  // Added method to show message info popup
+  void _showMessageInfo(Map<String, dynamic> message) {
+    final isSentByMe = message['sender'] == _currentUserId;
+    if (!isSentByMe) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white.withOpacity(0.9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text(
+          'Message Info',
+          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Delivered: ${_formatTimestampForDialog(message['deliveredAt'])}',
+              style: const TextStyle(color: Colors.black54),
+            ),
+            Text(
+              'Seen: ${_formatTimestampForDialog(message['seenAt'])}',
+              style: const TextStyle(color: Colors.black54),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Close',
+              style: TextStyle(color: Colors.cyanAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -587,7 +649,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         child: SafeArea(
           child: Column(
             children: [
-              // Header
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
                 child: Row(
@@ -643,7 +704,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   ],
                 ),
               ),
-              // Chat messages
               Expanded(
                 child: ListView.builder(
                   controller: _scrollController,
@@ -658,120 +718,151 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
                     return FadeTransition(
                       opacity: _fadeAnimation,
-                      child: Row(
-                        mainAxisAlignment: isSentByMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-                        children: [
-                          if (!isSentByMe) ...[
-                            CircleAvatar(
-                              backgroundColor: Colors.cyanAccent.withOpacity(0.3),
-                              radius: 20,
-                              child: widget.receiverProfilePic != null && widget.receiverProfilePic!.isNotEmpty
-                                  ? ClipOval(
-                                      child: CachedNetworkImage(
-                                        imageUrl: widget.receiverProfilePic!,
-                                        fit: BoxFit.cover,
-                                        width: 40,
-                                        height: 40,
-                                        placeholder: (context, url) => const CircularProgressIndicator(),
-                                        errorWidget: (context, url, error) => Text(
-                                          username[0].toUpperCase(),
-                                          style: const TextStyle(color: Colors.white),
+                      child: GestureDetector(
+                        onLongPress: () => _showMessageInfo(message), // Added long press for message info
+                        child: Row(
+                          mainAxisAlignment: isSentByMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+                          children: [
+                            if (!isSentByMe) ...[
+                              CircleAvatar(
+                                backgroundColor: Colors.cyanAccent.withOpacity(0.3),
+                                radius: 20,
+                                child: widget.receiverProfilePic != null && widget.receiverProfilePic!.isNotEmpty
+                                    ? ClipOval(
+                                        child: CachedNetworkImage(
+                                          imageUrl: widget.receiverProfilePic!,
+                                          fit: BoxFit.cover,
+                                          width: 40,
+                                          height: 40,
+                                          placeholder: (context, url) => const CircularProgressIndicator(),
+                                          errorWidget: (context, url, error) => Text(
+                                            username[0].toUpperCase(),
+                                            style: const TextStyle(color: Colors.white),
+                                          ),
                                         ),
+                                      )
+                                    : Text(
+                                        username[0].toUpperCase(),
+                                        style: const TextStyle(color: Colors.white),
                                       ),
-                                    )
-                                  : Text(
-                                      username[0].toUpperCase(),
-                                      style: const TextStyle(color: Colors.white),
-                                    ),
-                            ),
-                            const SizedBox(width: 10),
-                          ],
-                          Flexible(
-                            child: Container(
-                              margin: const EdgeInsets.symmetric(vertical: 5),
-                              padding: const EdgeInsets.all(12),
-                              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
-                              decoration: BoxDecoration(
-                                color: isSentByMe ? Colors.cyanAccent.withOpacity(0.2) : Colors.white.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(15),
                               ),
-                              child: Column(
-                                crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    username,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isSentByMe ? Colors.cyanAccent : Colors.white70,
-                                      fontWeight: FontWeight.bold,
+                              const SizedBox(width: 10),
+                            ],
+                            Flexible(
+                              child: Container(
+                                margin: const EdgeInsets.symmetric(vertical: 5),
+                                padding: const EdgeInsets.all(12),
+                                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+                                decoration: BoxDecoration(
+                                  color: isSentByMe ? Colors.cyanAccent.withOpacity(0.2) : Colors.white.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(15),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      username,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isSentByMe ? Colors.cyanAccent : Colors.white70,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(height: 5),
-                                  if (message['isVoice'] == true)
-                                    GestureDetector(
-                                      onTap: () {
-                                        if (voiceId != null) {
-                                          _playVoiceMessage(
-                                            voiceId,
-                                            message['localFilePath'] as String?,
-                                          );
-                                        } else {
-                                          AppLogger.error('No voiceId or messageId found for voice message');
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(content: Text('Cannot play voice message: Missing ID')),
-                                          );
-                                        }
-                                      },
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          _pulseAnimation != null
-                                              ? ScaleTransition(
-                                                  scale: isPlaying ? _pulseAnimation! : const AlwaysStoppedAnimation(1.0),
-                                                  child: Icon(
+                                    const SizedBox(height: 5),
+                                    if (message['isVoice'] == true)
+                                      GestureDetector(
+                                        onTap: () {
+                                          if (voiceId != null) {
+                                            _playVoiceMessage(
+                                              voiceId,
+                                              message['localFilePath'] as String?,
+                                            );
+                                          } else {
+                                            AppLogger.error('No voiceId or messageId found for voice message');
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(content: Text('Cannot play voice message: Missing ID')),
+                                            );
+                                          }
+                                        },
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            _pulseAnimation != null
+                                                ? ScaleTransition(
+                                                    scale: isPlaying ? _pulseAnimation! : const AlwaysStoppedAnimation(1.0),
+                                                    child: Icon(
+                                                      isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                                                      color: Colors.cyanAccent,
+                                                    ),
+                                                  )
+                                                : Icon(
                                                     isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
                                                     color: Colors.cyanAccent,
                                                   ),
-                                                )
-                                              : Icon(
-                                                  isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                                                  color: Colors.cyanAccent,
-                                                ),
-                                          const SizedBox(width: 5),
-                                          Text(
-                                            '${message['voiceDuration']}s',
-                                            style: const TextStyle(fontSize: 16, color: Colors.white),
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              '${message['voiceDuration']}s',
+                                              style: const TextStyle(fontSize: 16, color: Colors.white),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                                    else
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              message['content'],
+                                              style: const TextStyle(fontSize: 16, color: Colors.white),
+                                            ),
                                           ),
+                                          if (isSentByMe) ...[
+                                            const SizedBox(width: 5),
+                                            Icon(
+                                              Icons.done_all,
+                                              size: 16,
+                                              color: message['seen'] == true ? Colors.cyanAccent : Colors.grey,
+                                            ),
+                                          ],
                                         ],
                                       ),
-                                    )
-                                  else
-                                    Text(
-                                      message['content'],
-                                      style: const TextStyle(fontSize: 16, color: Colors.white),
+                                    const SizedBox(height: 5),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          _formatTimestamp(message['timestamp']),
+                                          style: const TextStyle(fontSize: 10, color: Colors.white70),
+                                        ),
+                                        if (isSentByMe && message['seen'] == true) ...[
+                                          const SizedBox(width: 5),
+                                          Text(
+                                            'Seen',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.cyanAccent,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
                                     ),
-                                  const SizedBox(height: 5),
-                                  Text(
-                                    _formatTimestamp(message['timestamp']),
-                                    style: const TextStyle(fontSize: 10, color: Colors.white70),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     );
                   },
                 ),
               ),
-              // Recording status
               if (_isRecording)
                 const Padding(
                   padding: EdgeInsets.only(bottom: 8.0),
                   child: Text('Recording...', style: TextStyle(color: Colors.redAccent)),
                 ),
-              // Message input
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
                 child: SlideTransition(
