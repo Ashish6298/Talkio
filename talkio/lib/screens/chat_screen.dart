@@ -648,70 +648,116 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 
-  Future<void> _sendImage() async {
-    PermissionStatus photoStatus = await Permission.photos.status;
+Future<void> _sendImage() async {
+  PermissionStatus photoStatus = await Permission.photos.status;
+  if (!photoStatus.isGranted) {
+    await _checkAndRequestPermissions();
+    photoStatus = await Permission.photos.status;
     if (!photoStatus.isGranted) {
-      await _checkAndRequestPermissions();
-      photoStatus = await Permission.photos.status;
-      if (!photoStatus.isGranted) {
-        return;
-      }
-    }
-
-    try {
-      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-      if (image == null) return;
-
-      final directory = await getDownloadDirectory();
-      final imageId = const Uuid().v4();
-      final filePath = '$directory/image_$imageId.jpg';
-      final file = File(filePath);
-      await file.writeAsBytes(await image.readAsBytes());
-
-      if (await file.exists()) {
-        AppLogger.info('Image saved successfully at: $filePath');
-      } else {
-        AppLogger.error('Failed to save image at: $filePath');
-        return;
-      }
-
-      final bytes = await file.readAsBytes();
-      final imageData = base64Encode(bytes);
-
-      final tempId = const Uuid().v4();
-      final message = {
-        'receiverId': widget.receiverId,
-        'content': 'Image',
-        'isImage': true,
-        'imageData': imageData,
-        'imageId': imageId,
-        'localFilePath': filePath,
-        'sender': _currentUserId,
-        'timestamp': DateTime.now().toIso8601String(),
-        'tempId': tempId,
-      };
-
-      setState(() {
-        _messages.add({
-          'tempId': tempId,
-          'content': 'Image',
-          'isImage': true,
-          'localFilePath': filePath,
-          'imageId': imageId,
-          'sender': _currentUserId,
-          'timestamp': DateTime.now().toIso8601String(),
-        });
-        _scrollToBottom();
-      });
-
-      socket.emit('sendMessage', message);
-    } catch (e) {
-      AppLogger.error('Error sending image', e);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to send image')),
-      );
+      return;
     }
   }
+
+  try {
+    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+    if (image == null) return;
+
+    // Show preview dialog
+    bool? shouldSend = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white.withOpacity(0.9),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.file(
+              File(image.path),
+              width: 300,
+              height: 300,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) => const Text(
+                'Failed to load image preview',
+                style: TextStyle(color: Colors.red),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false), // Close button
+            child: const Text(
+              'Close',
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true), // Send button
+            child: const Text(
+              'Send',
+              style: TextStyle(color: Colors.black54),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldSend != true) {
+      // If user clicks Close or dismisses dialog, return to gallery selection
+      return;
+    }
+
+    // Proceed with sending if user clicked Send
+    final directory = await getDownloadDirectory();
+    final imageId = const Uuid().v4();
+    final filePath = '$directory/image_$imageId.jpg';
+    final file = File(filePath);
+    await file.writeAsBytes(await image.readAsBytes());
+
+    if (await file.exists()) {
+      AppLogger.info('Image saved successfully at: $filePath');
+    } else {
+      AppLogger.error('Failed to save image at: $filePath');
+      return;
+    }
+
+    final bytes = await file.readAsBytes();
+    final imageData = base64Encode(bytes);
+
+    final tempId = const Uuid().v4();
+    final message = {
+      'receiverId': widget.receiverId,
+      'content': 'Image',
+      'isImage': true,
+      'imageData': imageData,
+      'imageId': imageId,
+      'localFilePath': filePath,
+      'sender': _currentUserId,
+      'timestamp': DateTime.now().toIso8601String(),
+      'tempId': tempId,
+    };
+
+    setState(() {
+      _messages.add({
+        'tempId': tempId,
+        'content': 'Image',
+        'isImage': true,
+        'localFilePath': filePath,
+        'imageId': imageId,
+        'sender': _currentUserId,
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+      _scrollToBottom();
+    });
+
+    socket.emit('sendMessage', message);
+  } catch (e) {
+    AppLogger.error('Error sending image', e);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Failed to send image')),
+    );
+  }
+}
 
   Future<void> _sendMessage() async {
     if (_isRecording) {
@@ -885,7 +931,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             onPressed: () => Navigator.pop(context),
             child: const Text(
               'Close',
-              style: TextStyle(color: Colors.cyanAccent),
+              style: TextStyle(color: Color.fromARGB(255, 0, 0, 0)),
             ),
           ),
         ],
