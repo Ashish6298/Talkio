@@ -26,6 +26,7 @@ dependencies:
   uuid: ^4.5.1
   shared_preferences: ^2.5.2
   device_info_plus: ^11.3.3
+  flutter_launcher_icons: ^0.14.3
 
 dev_dependencies:
   flutter_test:
@@ -35,3 +36,17 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Add assets section if you have any (optional)
+  assets:
+    - assets/icons/  # Adjust this path based on where you store your icon
+
+# Add this section for flutter_launcher_icons configuration
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/app_icon.png"  # Path to your icon image
+  # min_sdk_android: 21  # Optional: Minimum Android SDK version
+  # Optional: For adaptive icons on Android
+  # adaptive_icon_background: "#FFFFFF"  # Background color
+  # adaptive_icon_foreground: "assets/icons/app_icon_foreground.png"  # Foreground image
