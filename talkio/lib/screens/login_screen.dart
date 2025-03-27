@@ -1,5 +1,3 @@
-
-
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -13,34 +11,55 @@ class LoginScreen extends StatefulWidget {
   _LoginScreenState createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
+class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   String? _errorMessage;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
+  late AnimationController _eyeController; // For eye icon animation
+  late Animation<double> _eyeFadeAnimation; // Fade for blink effect
+  late Animation<double> _eyeScaleAnimation; // Scale for emphasis
+  bool _obscurePassword = true;
 
   @override
   void initState() {
     super.initState();
-    // Initialize animation controller
+
+    // Main animation controller for fade and slide
     _animationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     );
 
-    // Fade animation for the title
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
     );
 
-    // Slide animation for the input fields and button
     _slideAnimation = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeOutBack),
     );
 
-    // Start the animation
+    // Eye icon animation controller
+    _eyeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600), // Total duration for the blink and scale
+    );
+
+    // Fade animation for the blink effect (out and back in)
+    _eyeFadeAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween<double>(begin: 1.0, end: 0.0), weight: 1.0),
+      TweenSequenceItem(tween: Tween<double>(begin: 0.0, end: 1.0), weight: 1.0),
+    ]).animate(
+      CurvedAnimation(parent: _eyeController, curve: Curves.easeInOut),
+    );
+
+    // Scale animation for a slight pop
+    _eyeScaleAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
+      CurvedAnimation(parent: _eyeController, curve: Curves.easeInOut),
+    );
+
     _animationController.forward();
   }
 
@@ -49,11 +68,12 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     _usernameController.dispose();
     _passwordController.dispose();
     _animationController.dispose();
+    _eyeController.dispose(); // Dispose the eye controller
     super.dispose();
   }
 
   Future<void> _login() async {
-    final url = Uri.parse('http://10.0.2.2:5000/api/auth/login');  //10.0.2.2
+    final url = Uri.parse('http://10.0.2.2:5000/api/auth/login');
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
@@ -88,8 +108,8 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              Color(0xFF1A1A2E), // Dark blue-grey
-              Color(0xFF16213E), // Slightly lighter blue-grey
+              Color(0xFF1A1A2E),
+              Color(0xFF16213E),
             ],
           ),
         ),
@@ -99,7 +119,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Title with fade animation
                 FadeTransition(
                   opacity: _fadeAnimation,
                   child: const Text(
@@ -129,30 +148,26 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                   ),
                 ),
                 const SizedBox(height: 50),
-                // Input fields and button with slide animation
                 SlideTransition(
                   position: _slideAnimation,
                   child: Column(
                     children: [
-                      // Username field with glassmorphic effect
                       _buildTextField(
                         controller: _usernameController,
                         label: 'Username',
                         icon: Icons.person_outline,
                       ),
                       const SizedBox(height: 20),
-                      // Password field with glassmorphic effect
                       _buildTextField(
                         controller: _passwordController,
                         label: 'Password',
                         icon: Icons.lock_outline,
-                        obscureText: true,
+                        obscureText: _obscurePassword,
+                        isPassword: true,
                       ),
                       const SizedBox(height: 30),
-                      // Futuristic login button
                       _buildLoginButton(),
                       const SizedBox(height: 20),
-                      // Register button
                       TextButton(
                         onPressed: () {
                           Navigator.push(
@@ -197,11 +212,12 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     required String label,
     required IconData icon,
     bool obscureText = false,
+    bool isPassword = false,
   }) {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(15),
-        color: Colors.white.withOpacity(0.1), // Glassmorphic effect
+        color: Colors.white.withOpacity(0.1),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.2),
@@ -218,6 +234,26 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           labelText: label,
           labelStyle: const TextStyle(color: Colors.white70),
           prefixIcon: Icon(icon, color: Colors.cyanAccent),
+          suffixIcon: isPassword
+              ? FadeTransition(
+                  opacity: _eyeFadeAnimation,
+                  child: ScaleTransition(
+                    scale: _eyeScaleAnimation,
+                    child: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                        color: Colors.cyanAccent,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                          _eyeController.forward(from: 0.0); // Trigger animation
+                        });
+                      },
+                    ),
+                  ),
+                )
+              : null,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(15),
             borderSide: BorderSide.none,
