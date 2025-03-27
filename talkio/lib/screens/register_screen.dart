@@ -13,7 +13,7 @@ class RegisterScreen extends StatefulWidget {
   _RegisterScreenState createState() => _RegisterScreenState();
 }
 
-class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProviderStateMixin {
+class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStateMixin { // Changed to TickerProviderStateMixin
   final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -21,8 +21,12 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
+  late AnimationController _eyeController; // For eye icon animation
+  late Animation<double> _eyeFadeAnimation; // Fade for blink effect
+  late Animation<double> _eyeScaleAnimation; // Scale for emphasis
   File? _profilePic;
   final ImagePicker _picker = ImagePicker();
+  bool _obscurePassword = true; // To toggle password visibility
 
   @override
   void initState() {
@@ -40,6 +44,25 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
       CurvedAnimation(parent: _animationController, curve: Curves.easeOutBack),
     );
 
+    // Eye icon animation controller
+    _eyeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600), // Total duration for the blink and scale
+    );
+
+    // Fade animation for the blink effect (out and back in)
+    _eyeFadeAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween<double>(begin: 1.0, end: 0.0), weight: 1.0),
+      TweenSequenceItem(tween: Tween<double>(begin: 0.0, end: 1.0), weight: 1.0),
+    ]).animate(
+      CurvedAnimation(parent: _eyeController, curve: Curves.easeInOut),
+    );
+
+    // Scale animation for a slight pop
+    _eyeScaleAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(
+      CurvedAnimation(parent: _eyeController, curve: Curves.easeInOut),
+    );
+
     _animationController.forward();
   }
 
@@ -49,6 +72,7 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
     _emailController.dispose();
     _passwordController.dispose();
     _animationController.dispose();
+    _eyeController.dispose(); // Dispose the eye controller
     super.dispose();
   }
 
@@ -230,7 +254,8 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
                               controller: _passwordController,
                               label: 'Password',
                               icon: Icons.lock_outline,
-                              obscureText: true,
+                              obscureText: _obscurePassword, // Use toggle
+                              isPassword: true, // Enable eye icon
                             ),
                             const SizedBox(height: 30),
                             _buildRegisterButton(),
@@ -283,6 +308,7 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
     required String label,
     required IconData icon,
     bool obscureText = false,
+    bool isPassword = false, // Add this parameter
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -304,6 +330,26 @@ class _RegisterScreenState extends State<RegisterScreen> with SingleTickerProvid
           labelText: label,
           labelStyle: const TextStyle(color: Colors.white70),
           prefixIcon: Icon(icon, color: Colors.cyanAccent),
+          suffixIcon: isPassword
+              ? FadeTransition(
+                  opacity: _eyeFadeAnimation,
+                  child: ScaleTransition(
+                    scale: _eyeScaleAnimation,
+                    child: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                        color: Colors.cyanAccent,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                          _eyeController.forward(from: 0.0); // Trigger animation
+                        });
+                      },
+                    ),
+                  ),
+                )
+              : null,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(15),
             borderSide: BorderSide.none,
