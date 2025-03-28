@@ -72,6 +72,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   AnimationController? _pulseAnimationController;
   Animation<double>? _pulseAnimation;
   final ImagePicker _picker = ImagePicker();
+  final Map<int, GlobalKey> _messageKeys = {};
 
   static const String baseUrl = 'http://10.0.2.2:5000'; // Update for physical device if needed
 
@@ -437,6 +438,47 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       });
     });
 
+    // Listen for reactions
+    socket.on('reactionAdded', (data) {
+      AppLogger.info('Reaction added: $data');
+      setState(() {
+        final messageIndex = _messages.indexWhere((msg) => msg['_id']?.toString() == data['messageId']?.toString());
+        if (messageIndex != -1) {
+          if (_messages[messageIndex]['reactions'] == null) {
+            _messages[messageIndex]['reactions'] = [];
+          }
+
+          // Check if the user already reacted
+          final existingReactionIndex = _messages[messageIndex]['reactions']
+              .indexWhere((reaction) => reaction['userId'] == data['userId']);
+          
+          if (existingReactionIndex != -1) {
+            // Replace the existing reaction with the new one
+            _messages[messageIndex]['reactions'][existingReactionIndex] = {
+              'emoji': data['emoji'],
+              'userId': data['userId'],
+              'username': data['username'],
+              'timestamp': data['timestamp'],
+            };
+          } else {
+            // Add a new reaction
+            _messages[messageIndex]['reactions'].add({
+              'emoji': data['emoji'],
+              'userId': data['userId'],
+              'username': data['username'],
+              'timestamp': data['timestamp'],
+            });
+          }
+        }
+      });
+    });
+
+    // Listen for reaction notifications (notification already removed as per previous request)
+    socket.on('reactionNotification', (data) {
+      AppLogger.info('Received reaction notification: $data');
+      // Notification removed as per previous request
+    });
+
     socket.on('error', (error) {
       AppLogger.error('ChatScreen: Socket error: $error');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -463,7 +505,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         if (data['success']) {
           final List<Map<String, dynamic>> fetchedMessages = List<Map<String, dynamic>>.from(data['messages']);
           
-          // Process each message to ensure localFilePath is set for images and voice notes
           for (var message in fetchedMessages) {
             if (message['isImage'] == true) {
               final imageId = message['imageId']?.toString() ?? message['_id']?.toString();
@@ -472,11 +513,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                 final filePath = '$directory/image_$imageId.jpg';
                 final file = File(filePath);
 
-                // Check if the image file already exists
                 if (await file.exists()) {
                   message['localFilePath'] = filePath;
                 } else if (message['imageData'] != null) {
-                  // If the server provides imageData, save it to the local file system
                   final bytes = base64Decode(message['imageData']);
                   await file.writeAsBytes(bytes);
                   if (await file.exists()) {
@@ -511,6 +550,16 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                   AppLogger.warning('Voice file not found and no voiceData provided for voiceId: $voiceId');
                 }
               }
+            }
+
+            // Ensure only one reaction per user when fetching chat history
+            if (message['reactions'] != null && message['reactions'].isNotEmpty) {
+              final Map<String, Map<String, dynamic>> uniqueReactions = {};
+              for (var reaction in message['reactions']) {
+                final userId = reaction['userId'].toString();
+                uniqueReactions[userId] = reaction; // Overwrite previous reaction for the same user
+              }
+              message['reactions'] = uniqueReactions.values.toList();
             }
           }
 
@@ -648,116 +697,113 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
   }
 
-Future<void> _sendImage() async {
-  PermissionStatus photoStatus = await Permission.photos.status;
-  if (!photoStatus.isGranted) {
-    await _checkAndRequestPermissions();
-    photoStatus = await Permission.photos.status;
+  Future<void> _sendImage() async {
+    PermissionStatus photoStatus = await Permission.photos.status;
     if (!photoStatus.isGranted) {
-      return;
+      await _checkAndRequestPermissions();
+      photoStatus = await Permission.photos.status;
+      if (!photoStatus.isGranted) {
+        return;
+      }
     }
-  }
 
-  try {
-    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-    if (image == null) return;
+    try {
+      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+      if (image == null) return;
 
-    // Show preview dialog
-    bool? shouldSend = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white.withOpacity(0.9),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Image.file(
-              File(image.path),
-              width: 300,
-              height: 300,
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) => const Text(
-                'Failed to load image preview',
-                style: TextStyle(color: Colors.red),
+      bool? shouldSend = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: Colors.white.withOpacity(0.9),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.file(
+                File(image.path),
+                width: 300,
+                height: 300,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) => const Text(
+                  'Failed to load image preview',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text(
+                'Close',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Send',
+                style: TextStyle(color: Colors.black54),
               ),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false), // Close button
-            child: const Text(
-              'Close',
-              style: TextStyle(color: Colors.grey),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true), // Send button
-            child: const Text(
-              'Send',
-              style: TextStyle(color: Colors.black54),
-            ),
-          ),
-        ],
-      ),
-    );
+      );
 
-    if (shouldSend != true) {
-      // If user clicks Close or dismisses dialog, return to gallery selection
-      return;
-    }
+      if (shouldSend != true) {
+        return;
+      }
 
-    // Proceed with sending if user clicked Send
-    final directory = await getDownloadDirectory();
-    final imageId = const Uuid().v4();
-    final filePath = '$directory/image_$imageId.jpg';
-    final file = File(filePath);
-    await file.writeAsBytes(await image.readAsBytes());
+      final directory = await getDownloadDirectory();
+      final imageId = const Uuid().v4();
+      final filePath = '$directory/image_$imageId.jpg';
+      final file = File(filePath);
+      await file.writeAsBytes(await image.readAsBytes());
 
-    if (await file.exists()) {
-      AppLogger.info('Image saved successfully at: $filePath');
-    } else {
-      AppLogger.error('Failed to save image at: $filePath');
-      return;
-    }
+      if (await file.exists()) {
+        AppLogger.info('Image saved successfully at: $filePath');
+      } else {
+        AppLogger.error('Failed to save image at: $filePath');
+        return;
+      }
 
-    final bytes = await file.readAsBytes();
-    final imageData = base64Encode(bytes);
+      final bytes = await file.readAsBytes();
+      final imageData = base64Encode(bytes);
 
-    final tempId = const Uuid().v4();
-    final message = {
-      'receiverId': widget.receiverId,
-      'content': 'Image',
-      'isImage': true,
-      'imageData': imageData,
-      'imageId': imageId,
-      'localFilePath': filePath,
-      'sender': _currentUserId,
-      'timestamp': DateTime.now().toIso8601String(),
-      'tempId': tempId,
-    };
-
-    setState(() {
-      _messages.add({
-        'tempId': tempId,
+      final tempId = const Uuid().v4();
+      final message = {
+        'receiverId': widget.receiverId,
         'content': 'Image',
         'isImage': true,
-        'localFilePath': filePath,
+        'imageData': imageData,
         'imageId': imageId,
+        'localFilePath': filePath,
         'sender': _currentUserId,
         'timestamp': DateTime.now().toIso8601String(),
-      });
-      _scrollToBottom();
-    });
+        'tempId': tempId,
+      };
 
-    socket.emit('sendMessage', message);
-  } catch (e) {
-    AppLogger.error('Error sending image', e);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Failed to send image')),
-    );
+      setState(() {
+        _messages.add({
+          'tempId': tempId,
+          'content': 'Image',
+          'isImage': true,
+          'localFilePath': filePath,
+          'imageId': imageId,
+          'sender': _currentUserId,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+        _scrollToBottom();
+      });
+
+      socket.emit('sendMessage', message);
+    } catch (e) {
+      AppLogger.error('Error sending image', e);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to send image')),
+      );
+    }
   }
-}
 
   Future<void> _sendMessage() async {
     if (_isRecording) {
@@ -869,6 +915,78 @@ Future<void> _sendImage() async {
         );
       }
     });
+  }
+
+  // Method to add a reaction
+  void _addReaction(String messageId, String emoji, String messageSenderId) {
+    AppLogger.info('Adding reaction: messageId=$messageId, emoji=$emoji');
+    socket.emit('addReaction', {
+      'messageId': messageId,
+      'emoji': emoji,
+      'senderId': _currentUserId,
+      'receiverId': widget.receiverId,
+      'messageSenderId': messageSenderId, // To notify the original sender of the message
+    });
+  }
+
+  // Show reaction picker as a pop-up
+  void _showReactionPicker(String messageId, int index, String messageSenderId) {
+    final RenderBox? renderBox = _messageKeys[index]?.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) {
+      AppLogger.error('Cannot find render box for message at index $index');
+      return;
+    }
+
+    final position = renderBox.localToGlobal(Offset.zero);
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (context) {
+        return Stack(
+          children: [
+            Positioned(
+              left: position.dx,
+              top: position.dy - 50,
+              child: Material(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(15),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildReactionButton(messageId, '❤️', messageSenderId),
+                      _buildReactionButton(messageId, '😂', messageSenderId),
+                      _buildReactionButton(messageId, '👍', messageSenderId),
+                      _buildReactionButton(messageId, '😮', messageSenderId),
+                      _buildReactionButton(messageId, '😢', messageSenderId),
+                      _buildReactionButton(messageId, '👏', messageSenderId),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildReactionButton(String messageId, String emoji, String messageSenderId) {
+    return GestureDetector(
+      onTap: () {
+        _addReaction(messageId, emoji, messageSenderId);
+        Navigator.pop(context);
+      },
+      child: Container(
+        padding: const EdgeInsets.all(5),
+        child: Text(
+          emoji,
+          style: const TextStyle(fontSize: 24),
+        ),
+      ),
+    );
   }
 
   @override
@@ -1021,11 +1139,14 @@ Future<void> _sendImage() async {
                     final isPlaying = _currentlyPlayingVoiceId == voiceId;
                     final localFilePath = message['localFilePath']?.toString();
 
+                    _messageKeys[index] = GlobalKey();
+
                     return FadeTransition(
                       opacity: _fadeAnimation,
                       child: GestureDetector(
                         onLongPress: () => _showMessageInfo(message),
                         child: Row(
+                          key: _messageKeys[index],
                           mainAxisAlignment: isSentByMe ? MainAxisAlignment.end : MainAxisAlignment.start,
                           children: [
                             if (!isSentByMe) ...[
@@ -1175,8 +1296,37 @@ Future<void> _sendImage() async {
                                             ),
                                           ),
                                         ],
+                                        const SizedBox(width: 5),
+                                        GestureDetector(
+                                          onTap: () => _showReactionPicker(
+                                            message['_id'].toString(),
+                                            index,
+                                            message['sender'].toString(),
+                                          ),
+                                          child: const Icon(
+                                            Icons.emoji_emotions_outlined,
+                                            size: 16,
+                                            color: Colors.white,
+                                          ),
+                                        ),
                                       ],
                                     ),
+                                    if (message['reactions'] != null && message['reactions'].isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 5),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: message['reactions'].map<Widget>((reaction) {
+                                            return Padding(
+                                              padding: const EdgeInsets.only(right: 5),
+                                              child: Text(
+                                                reaction['emoji'],
+                                                style: const TextStyle(fontSize: 16),
+                                              ),
+                                            );
+                                          }).toList(),
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),

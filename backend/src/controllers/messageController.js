@@ -1,3 +1,4 @@
+
 const jwt = require('jsonwebtoken');
 const Message = require('../models/Message');
 const User = require('../models/User');
@@ -108,6 +109,50 @@ const setupMessaging = (io) => {
       }
     });
 
+    // New event for adding reactions
+    socket.on("addReaction", async ({ messageId, emoji }) => {
+      try {
+        const userId = socket.userId;
+        const message = await Message.findById(messageId);
+
+        if (!message) {
+          return socket.emit("error", { error: "Message not found" });
+        }
+
+        // Check if the user is either the sender or receiver of the message
+        if (message.sender.toString() !== userId && message.receiver.toString() !== userId) {
+          return socket.emit("error", { error: "You can only react to messages in your chats" });
+        }
+
+        // Add the reaction to the message
+        message.reactions.push({
+          emoji,
+          userId,
+          timestamp: new Date(),
+        });
+        await message.save();
+
+        // Emit the updated message with reactions to both sender and receiver
+        io.to(message.sender.toString()).emit("reactionAdded", {
+          messageId: message._id,
+          emoji,
+          userId,
+          timestamp: new Date(),
+        });
+        io.to(message.receiver.toString()).emit("reactionAdded", {
+          messageId: message._id,
+          emoji,
+          userId,
+          timestamp: new Date(),
+        });
+
+        console.log(`Reaction added by ${userId} to message ${messageId}: ${emoji}`);
+      } catch (error) {
+        console.error("Error adding reaction:", error);
+        socket.emit("error", { error: "Failed to add reaction" });
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`User disconnected: ${socket.userId} (Socket ID: ${socket.id})`);
     });
@@ -136,7 +181,9 @@ const getChatHistory = async (req, res) => {
         { sender: userId, receiver: otherUserId },
         { sender: otherUserId, receiver: userId },
       ],
-    }).sort({ timestamp: 1 });
+    })
+      .populate('reactions.userId', 'username') // Populate the userId in reactions to get the username
+      .sort({ timestamp: 1 });
 
     res.json({ success: true, messages });
   } catch (error) {
