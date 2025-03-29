@@ -12,14 +12,41 @@ class ProfileScreen extends StatefulWidget {
   _ProfileScreenState createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
+class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
   Map<String, dynamic>? _profile;
   bool _isLoading = true;
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<double> _rotateAnimation;
+  late Animation<double> _scaleAnimation;
+  late Animation<Offset> _slideAnimation;
 
   @override
   void initState() {
     super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: const Interval(0.0, 0.6, curve: Curves.easeIn)),
+    );
+
+    _rotateAnimation = Tween<double>(begin: -0.1, end: 0.0).animate(
+      CurvedAnimation(parent: _animationController, curve: const Interval(0.0, 0.6, curve: Curves.easeOut)),
+    );
+
+    _scaleAnimation = Tween<double>(begin: 0.5, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: const Interval(0.2, 0.8, curve: Curves.easeOutBack)),
+    );
+
+    _slideAnimation = Tween<Offset>(begin: const Offset(1.0, 0), end: Offset.zero).animate(
+      CurvedAnimation(parent: _animationController, curve: const Interval(0.4, 1.0, curve: Curves.easeOut)),
+    );
+
     _fetchProfile();
+    _animationController.forward();
   }
 
   Future<void> _fetchProfile() async {
@@ -59,22 +86,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF1A1A2E),
-              Color(0xFF16213E),
+              Color(0xFF0D1B2A),
+              Color(0xFF1B263B),
+              Color(0xFF415A77),
             ],
           ),
         ),
-        child: Column( // Removed SafeArea, wrapped content in Column
+        child: Column(
           children: [
-            Expanded( // Added Expanded to ensure content takes full height
+            Expanded(
               child: _isLoading
                   ? const Center(
                       child: CircularProgressIndicator(
@@ -85,113 +119,155 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ? const Center(
                           child: Text(
                             'Unable to load profile',
-                            style: TextStyle(color: Colors.white),
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         )
                       : SingleChildScrollView(
-                          padding: const EdgeInsets.all(16.0),
+                          padding: const EdgeInsets.all(20.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              // Profile Picture
-                              CircleAvatar(
-                                radius: 50,
-                                backgroundColor: Colors.cyanAccent.withOpacity(0.3),
-                                child: _profile!['profilePic'] != null && _profile!['profilePic'].isNotEmpty
-                                    ? ClipOval(
-                                        child: CachedNetworkImage(
-                                          imageUrl: _profile!['profilePic'],
-                                          fit: BoxFit.cover,
-                                          width: 100,
-                                          height: 100,
-                                          placeholder: (context, url) => const CircularProgressIndicator(
-                                            color: Colors.cyanAccent,
-                                          ),
-                                          errorWidget: (context, url, error) => Text(
-                                            _profile!['username'][0].toUpperCase(),
-                                            style: const TextStyle(color: Colors.white, fontSize: 40),
+                              // Profile Card with Rotate and Fade Animation
+                              FadeTransition(
+                                opacity: _fadeAnimation,
+                                child: Transform.rotate(
+                                  angle: _rotateAnimation.value,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(20),
+                                    margin: const EdgeInsets.symmetric(horizontal: 20),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 2),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.3),
+                                          blurRadius: 15,
+                                          offset: const Offset(0, 5),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        CircleAvatar(
+                                          radius: 60,
+                                          backgroundColor: Colors.cyanAccent.withOpacity(0.3),
+                                          child: _profile!['profilePic'] != null && _profile!['profilePic'].isNotEmpty
+                                              ? ClipOval(
+                                                  child: CachedNetworkImage(
+                                                    imageUrl: _profile!['profilePic'],
+                                                    fit: BoxFit.cover,
+                                                    width: 120,
+                                                    height: 120,
+                                                    placeholder: (context, url) => const CircularProgressIndicator(
+                                                      color: Colors.cyanAccent,
+                                                    ),
+                                                    errorWidget: (context, url, error) => Text(
+                                                      _profile!['username'][0].toUpperCase(),
+                                                      style: const TextStyle(color: Colors.white, fontSize: 50, fontWeight: FontWeight.bold),
+                                                    ),
+                                                  ),
+                                                )
+                                              : Text(
+                                                  _profile!['username'][0].toUpperCase(),
+                                                  style: const TextStyle(color: Colors.white, fontSize: 50, fontWeight: FontWeight.bold),
+                                                ),
+                                        ),
+                                        const SizedBox(height: 15),
+                                        Text(
+                                          _profile!['username'],
+                                          style: const TextStyle(
+                                            fontSize: 32,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                            letterSpacing: 1.5,
                                           ),
                                         ),
-                                      )
-                                    : Text(
-                                        _profile!['username'][0].toUpperCase(),
-                                        style: const TextStyle(color: Colors.white, fontSize: 40),
-                                      ),
-                              ),
-                              const SizedBox(height: 16),
-                              // Username
-                              Text(
-                                _profile!['username'],
-                                style: const TextStyle(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                  shadows: [
-                                    Shadow(
-                                      color: Colors.cyanAccent,
-                                      blurRadius: 5,
-                                      offset: Offset(0, 0),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          _profile!['email'],
+                                          style: const TextStyle(
+                                            fontSize: 18,
+                                            color: Colors.cyanAccent,
+                                            letterSpacing: 1.2,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              // Email
-                              Text(
-                                _profile!['email'],
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  color: Colors.white70,
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              // Number of Friends
-                              _buildInfoCard(
-                                title: 'Friends',
-                                value: _profile!['numberOfFriends'].toString(),
-                              ),
-                              const SizedBox(height: 8),
-                              // Sent Requests Count
-                              _buildInfoCard(
-                                title: 'Sent Requests',
-                                value: _profile!['sentRequestsCount'].toString(),
-                              ),
-                              const SizedBox(height: 8),
-                              // Received Requests Count
-                              _buildInfoCard(
-                                title: 'Received Requests',
-                                value: _profile!['receivedRequestsCount'].toString(),
-                              ),
-                              const SizedBox(height: 16),
-                              // Friends List
-                              if (_profile!['friends'].isNotEmpty) ...[
-                                const Text(
-                                  'Your Friends',
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                    shadows: [
-                                      Shadow(
-                                        color: Colors.cyanAccent,
-                                        blurRadius: 5,
-                                        offset: Offset(0, 0),
-                                      ),
-                                    ],
                                   ),
                                 ),
-                                const SizedBox(height: 8),
-                                ListView.builder(
-                                  shrinkWrap: true,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  itemCount: _profile!['friends'].length,
-                                  itemBuilder: (context, index) {
-                                    final friend = _profile!['friends'][index];
-                                    return _buildFriendTile(
-                                      username: friend['username'],
-                                      profilePic: friend['profilePic'],
-                                    );
-                                  },
+                              ),
+                              const SizedBox(height: 30),
+                              // Info Tiles with Scale Animation
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                children: [
+                                  ScaleTransition(
+                                    scale: _scaleAnimation,
+                                    child: _buildInfoTile(
+                                      title: 'Friends',
+                                      value: _profile!['numberOfFriends'].toString(),
+                                    ),
+                                  ),
+                                  ScaleTransition(
+                                    scale: Tween<double>(begin: 0.5, end: 1.0).animate(
+                                      CurvedAnimation(parent: _animationController, curve: const Interval(0.3, 0.9, curve: Curves.easeOutBack)),
+                                    ),
+                                    child: _buildInfoTile(
+                                      title: 'Sent',
+                                      value: _profile!['sentRequestsCount'].toString(),
+                                    ),
+                                  ),
+                                  ScaleTransition(
+                                    scale: Tween<double>(begin: 0.5, end: 1.0).animate(
+                                      CurvedAnimation(parent: _animationController, curve: const Interval(0.4, 1.0, curve: Curves.easeOutBack)),
+                                    ),
+                                    child: _buildInfoTile(
+                                      title: 'Received',
+                                      value: _profile!['receivedRequestsCount'].toString(),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 30),
+                              // Friends Grid with Slide Animation
+                              if (_profile!['friends'].isNotEmpty) ...[
+                                Text(
+                                  'Your Friends',
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                    letterSpacing: 1.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 15),
+                                SlideTransition(
+                                  position: _slideAnimation,
+                                  child: FadeTransition(
+                                    opacity: Tween<double>(begin: 0.0, end: 1.0).animate(
+                                      CurvedAnimation(parent: _animationController, curve: const Interval(0.4, 1.0, curve: Curves.easeIn)),
+                                    ),
+                                    child: Wrap(
+                                      spacing: 15,
+                                      runSpacing: 15,
+                                      alignment: WrapAlignment.center,
+                                      children: List.generate(
+                                        _profile!['friends'].length,
+                                        (index) {
+                                          final friend = _profile!['friends'][index];
+                                          return _buildFriendCard(
+                                            username: friend['username'],
+                                            profilePic: friend['profilePic'],
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ],
                             ],
@@ -204,81 +280,103 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildInfoCard({required String title, required String value}) {
+  Widget _buildInfoTile({required String title, required String value}) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      width: 100,
+      height: 100,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        color: Colors.white.withOpacity(0.1),
+        shape: BoxShape.circle,
+        color: Colors.white.withOpacity(0.15),
+        border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 2),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.2),
             blurRadius: 10,
-            offset: const Offset(0, 5),
+            offset: const Offset(0, 3),
           ),
         ],
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Colors.cyanAccent,
+            ),
+          ),
+          const SizedBox(height: 5),
           Text(
             title,
             style: const TextStyle(
               fontSize: 16,
-              fontWeight: FontWeight.bold,
               color: Colors.white,
+              letterSpacing: 1.1,
             ),
-          ),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 16,
-              color: Colors.cyanAccent,
-            ),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildFriendTile({required String username, String? profilePic}) {
+  Widget _buildFriendCard({required String username, String? profilePic}) {
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 5.0),
+      width: 140,
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(15),
         color: Colors.white.withOpacity(0.1),
-      ),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: Colors.cyanAccent.withOpacity(0.3),
-          child: profilePic != null && profilePic.isNotEmpty
-              ? ClipOval(
-                  child: CachedNetworkImage(
-                    imageUrl: profilePic,
-                    fit: BoxFit.cover,
-                    width: 40,
-                    height: 40,
-                    placeholder: (context, url) => const CircularProgressIndicator(
-                      color: Colors.cyanAccent,
-                    ),
-                    errorWidget: (context, url, error) => Text(
-                      username[0].toUpperCase(),
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                  ),
-                )
-              : Text(
-                  username[0].toUpperCase(),
-                  style: const TextStyle(color: Colors.white),
-                ),
-        ),
-        title: Text(
-          username,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w500,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
           ),
-        ),
+        ],
+      ),
+      child: Column(
+        children: [
+          CircleAvatar(
+            radius: 30,
+            backgroundColor: Colors.cyanAccent.withOpacity(0.3),
+            child: profilePic != null && profilePic.isNotEmpty
+                ? ClipOval(
+                    child: CachedNetworkImage(
+                      imageUrl: profilePic,
+                      fit: BoxFit.cover,
+                      width: 60,
+                      height: 60,
+                      placeholder: (context, url) => const CircularProgressIndicator(
+                        color: Colors.cyanAccent,
+                      ),
+                      errorWidget: (context, url, error) => Text(
+                        username[0].toUpperCase(),
+                        style: const TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  )
+                : Text(
+                    username[0].toUpperCase(),
+                    style: const TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.bold),
+                  ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            username,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.1,
+            ),
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
       ),
     );
   }
