@@ -33,7 +33,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       CurvedAnimation(parent: _animationController, curve: const Interval(0.0, 0.6, curve: Curves.easeIn)),
     );
 
-    _rotateAnimation = Tween<double>(begin: -0.1, end: 0.0).animate(
+    _rotateAnimation = Tween<double>(begin: -0.05, end: 0.0).animate(
       CurvedAnimation(parent: _animationController, curve: const Interval(0.0, 0.6, curve: Curves.easeOut)),
     );
 
@@ -59,26 +59,30 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        if (data['success']) {
+        if (data['success'] == true) {
           setState(() {
-            _profile = data['profile'];
+            _profile = data['profile'] as Map<String, dynamic>?;
             _isLoading = false;
           });
+        } else {
+          throw Exception('API returned success: false - ${data['message'] ?? 'Unknown error'}');
         }
       } else {
-        throw Exception('Failed to load profile: ${response.body}');
+        throw Exception('Failed to load profile: ${response.statusCode} - ${response.body}');
       }
     } catch (error) {
       print('Error fetching profile: $error');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Failed to load profile',
-            style: const TextStyle(color: Colors.white),
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to load profile: $error',
+              style: const TextStyle(color: Colors.white),
+            ),
+            backgroundColor: Colors.redAccent.withOpacity(0.8),
           ),
-          backgroundColor: Colors.redAccent.withOpacity(0.8),
-        ),
-      );
+        );
+      }
       setState(() {
         _isLoading = false;
       });
@@ -89,6 +93,30 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   void dispose() {
     _animationController.dispose();
     super.dispose();
+  }
+
+  // Method to show the friends list in a popup
+  void _showFriendsPopup(BuildContext context) {
+    if (_profile == null || _profile!['friends'] == null || (_profile!['friends'] as List).isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No friends to display',
+            style: TextStyle(color: Colors.white),
+          ),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    print('Friends list before showing popup: ${_profile!['friends']}'); // Debug
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return FriendsPopup(friends: _profile!['friends'] as List);
+      },
+    );
   }
 
   @override
@@ -106,175 +134,144 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
             ],
           ),
         ),
-        child: Column(
-          children: [
-            Expanded(
-              child: _isLoading
+        child: SafeArea(
+          child: _isLoading
+              ? const Center(
+                  child: CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.cyanAccent),
+                  ),
+                )
+              : _profile == null
                   ? const Center(
-                      child: CircularProgressIndicator(
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.cyanAccent),
+                      child: Text(
+                        'Unable to load profile',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     )
-                  : _profile == null
-                      ? const Center(
-                          child: Text(
-                            'Unable to load profile',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        )
-                      : SingleChildScrollView(
-                          padding: const EdgeInsets.all(20.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              // Profile Card with Rotate and Fade Animation
-                              FadeTransition(
-                                opacity: _fadeAnimation,
-                                child: Transform.rotate(
-                                  angle: _rotateAnimation.value,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(20),
-                                    margin: const EdgeInsets.symmetric(horizontal: 20),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(20),
-                                      border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 2),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withOpacity(0.3),
-                                          blurRadius: 15,
-                                          offset: const Offset(0, 5),
-                                        ),
-                                      ],
-                                    ),
-                                    child: Column(
-                                      children: [
-                                        CircleAvatar(
-                                          radius: 60,
-                                          backgroundColor: Colors.cyanAccent.withOpacity(0.3),
-                                          child: _profile!['profilePic'] != null && _profile!['profilePic'].isNotEmpty
-                                              ? ClipOval(
-                                                  child: CachedNetworkImage(
-                                                    imageUrl: _profile!['profilePic'],
-                                                    fit: BoxFit.cover,
-                                                    width: 120,
-                                                    height: 120,
-                                                    placeholder: (context, url) => const CircularProgressIndicator(
-                                                      color: Colors.cyanAccent,
+                  : CustomScrollView(
+                      slivers: [
+                        SliverFillRemaining(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(20.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                // Profile Card with Rotate and Fade Animation
+                                FadeTransition(
+                                  opacity: _fadeAnimation,
+                                  child: Transform.rotate(
+                                    angle: _rotateAnimation.value,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(20),
+                                      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 2),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(0.3),
+                                            blurRadius: 15,
+                                            offset: const Offset(0, 5),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          CircleAvatar(
+                                            radius: 60,
+                                            backgroundColor: Colors.cyanAccent.withOpacity(0.3),
+                                            child: _profile!['profilePic'] != null && _profile!['profilePic'].isNotEmpty
+                                                ? ClipOval(
+                                                    child: CachedNetworkImage(
+                                                      imageUrl: _profile!['profilePic'] as String,
+                                                      fit: BoxFit.cover,
+                                                      width: 120,
+                                                      height: 120,
+                                                      placeholder: (context, url) => const CircularProgressIndicator(
+                                                        color: Colors.cyanAccent,
+                                                      ),
+                                                      errorWidget: (context, url, error) => Text(
+                                                        (_profile!['username'] as String)[0].toUpperCase(),
+                                                        style: const TextStyle(color: Colors.white, fontSize: 50, fontWeight: FontWeight.bold),
+                                                      ),
                                                     ),
-                                                    errorWidget: (context, url, error) => Text(
-                                                      _profile!['username'][0].toUpperCase(),
-                                                      style: const TextStyle(color: Colors.white, fontSize: 50, fontWeight: FontWeight.bold),
-                                                    ),
+                                                  )
+                                                : Text(
+                                                    (_profile!['username'] as String)[0].toUpperCase(),
+                                                    style: const TextStyle(color: Colors.white, fontSize: 50, fontWeight: FontWeight.bold),
                                                   ),
-                                                )
-                                              : Text(
-                                                  _profile!['username'][0].toUpperCase(),
-                                                  style: const TextStyle(color: Colors.white, fontSize: 50, fontWeight: FontWeight.bold),
-                                                ),
-                                        ),
-                                        const SizedBox(height: 15),
-                                        Text(
-                                          _profile!['username'],
-                                          style: const TextStyle(
-                                            fontSize: 32,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.white,
-                                            letterSpacing: 1.5,
                                           ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          _profile!['email'],
-                                          style: const TextStyle(
-                                            fontSize: 18,
-                                            color: Colors.cyanAccent,
-                                            letterSpacing: 1.2,
+                                          const SizedBox(height: 15),
+                                          Text(
+                                            _profile!['username'] as String,
+                                            style: const TextStyle(
+                                              fontSize: 32,
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                              letterSpacing: 1.5,
+                                            ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 30),
-                              // Info Tiles with Scale Animation
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                children: [
-                                  ScaleTransition(
-                                    scale: _scaleAnimation,
-                                    child: _buildInfoTile(
-                                      title: 'Friends',
-                                      value: _profile!['numberOfFriends'].toString(),
-                                    ),
-                                  ),
-                                  ScaleTransition(
-                                    scale: Tween<double>(begin: 0.5, end: 1.0).animate(
-                                      CurvedAnimation(parent: _animationController, curve: const Interval(0.3, 0.9, curve: Curves.easeOutBack)),
-                                    ),
-                                    child: _buildInfoTile(
-                                      title: 'Sent',
-                                      value: _profile!['sentRequestsCount'].toString(),
-                                    ),
-                                  ),
-                                  ScaleTransition(
-                                    scale: Tween<double>(begin: 0.5, end: 1.0).animate(
-                                      CurvedAnimation(parent: _animationController, curve: const Interval(0.4, 1.0, curve: Curves.easeOutBack)),
-                                    ),
-                                    child: _buildInfoTile(
-                                      title: 'Received',
-                                      value: _profile!['receivedRequestsCount'].toString(),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 30),
-                              // Friends Grid with Slide Animation
-                              if (_profile!['friends'].isNotEmpty) ...[
-                                Text(
-                                  'Your Friends',
-                                  style: const TextStyle(
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                    letterSpacing: 1.5,
-                                  ),
-                                ),
-                                const SizedBox(height: 15),
-                                SlideTransition(
-                                  position: _slideAnimation,
-                                  child: FadeTransition(
-                                    opacity: Tween<double>(begin: 0.0, end: 1.0).animate(
-                                      CurvedAnimation(parent: _animationController, curve: const Interval(0.4, 1.0, curve: Curves.easeIn)),
-                                    ),
-                                    child: Wrap(
-                                      spacing: 15,
-                                      runSpacing: 15,
-                                      alignment: WrapAlignment.center,
-                                      children: List.generate(
-                                        _profile!['friends'].length,
-                                        (index) {
-                                          final friend = _profile!['friends'][index];
-                                          return _buildFriendCard(
-                                            username: friend['username'],
-                                            profilePic: friend['profilePic'],
-                                          );
-                                        },
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            _profile!['email'] as String,
+                                            style: const TextStyle(
+                                              fontSize: 18,
+                                              color: Colors.cyanAccent,
+                                              letterSpacing: 1.2,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   ),
                                 ),
+                                const SizedBox(height: 30),
+                                // Info Tiles with Scale Animation
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () => _showFriendsPopup(context),
+                                      child: ScaleTransition(
+                                        scale: _scaleAnimation,
+                                        child: _buildInfoTile(
+                                          title: 'Friends',
+                                          value: _profile!['numberOfFriends'].toString(),
+                                        ),
+                                      ),
+                                    ),
+                                    ScaleTransition(
+                                      scale: Tween<double>(begin: 0.5, end: 1.0).animate(
+                                        CurvedAnimation(parent: _animationController, curve: const Interval(0.3, 0.9, curve: Curves.easeOutBack)),
+                                      ),
+                                      child: _buildInfoTile(
+                                        title: 'Sent',
+                                        value: _profile!['sentRequestsCount'].toString(),
+                                      ),
+                                    ),
+                                    ScaleTransition(
+                                      scale: Tween<double>(begin: 0.5, end: 1.0).animate(
+                                        CurvedAnimation(parent: _animationController, curve: const Interval(0.4, 1.0, curve: Curves.easeOutBack)),
+                                      ),
+                                      child: _buildInfoTile(
+                                        title: 'Received',
+                                        value: _profile!['receivedRequestsCount'].toString(),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 30),
                               ],
-                            ],
+                            ),
                           ),
                         ),
-            ),
-          ],
+                      ],
+                    ),
         ),
       ),
     );
@@ -321,13 +318,152 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       ),
     );
   }
+}
+
+// Updated Widget for Friends Popup with Search Bar
+class FriendsPopup extends StatefulWidget {
+  final List friends;
+
+  const FriendsPopup({super.key, required this.friends});
+
+  @override
+  _FriendsPopupState createState() => _FriendsPopupState();
+}
+
+class _FriendsPopupState extends State<FriendsPopup> {
+  final TextEditingController _searchController = TextEditingController();
+  List<dynamic> _filteredFriends = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filteredFriends = widget.friends;
+    _searchController.addListener(_filterFriends);
+    print('Initial friends list: ${widget.friends}'); // Debug
+  }
+
+  void _filterFriends() {
+    final query = _searchController.text.toLowerCase();
+    setState(() {
+      _filteredFriends = widget.friends.where((friend) {
+        final username = friend['username']?.toString().toLowerCase() ?? '';
+        return username.contains(query);
+      }).toList();
+      print('Filtered friends for query "$query": $_filteredFriends'); // Debug
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Make the height dynamic based on screen size
+    final screenHeight = MediaQuery.of(context).size.height;
+    final maxListHeight = screenHeight * 0.4; // 40% of screen height
+
+    return Dialog(
+      backgroundColor: Colors.black.withOpacity(0.8), // Semi-opaque background for the dialog to dim the background
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1B263B), // Fully opaque dark background (matches the app's gradient theme)
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 15,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Your Friends',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 15),
+            // Search Bar
+            TextField(
+              controller: _searchController,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Search friends...',
+                hintStyle: const TextStyle(color: Colors.white54),
+                prefixIcon: const Icon(Icons.search, color: Colors.cyanAccent),
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.2),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(15),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+            const SizedBox(height: 15),
+            // Friends List with dynamic height
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: maxListHeight, // Dynamic height
+                minHeight: 100, // Minimum height to avoid collapse
+              ),
+              child: _filteredFriends.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No friends found',
+                        style: TextStyle(color: Colors.white, fontSize: 16),
+                      ),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _filteredFriends.length,
+                      itemBuilder: (context, index) {
+                        final friend = _filteredFriends[index];
+                        return _buildFriendCard(
+                          username: friend['username']?.toString() ?? 'Unknown',
+                          profilePic: friend['profilePic']?.toString(),
+                        );
+                      },
+                    ),
+            ),
+            const SizedBox(height: 15),
+            // Close Button
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.cyanAccent.withOpacity(0.8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text(
+                'Close',
+                style: TextStyle(color: Colors.white, fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildFriendCard({required String username, String? profilePic}) {
+    final displayUsername = username.isEmpty ? 'Unknown' : username;
     return Container(
-      width: 140,
+      margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
+        color: Colors.white.withOpacity(0.1), // Keep the card slightly transparent for contrast
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 1),
         boxShadow: [
@@ -338,43 +474,45 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
           ),
         ],
       ),
-      child: Column(
+      child: Row(
         children: [
           CircleAvatar(
-            radius: 30,
+            radius: 25,
             backgroundColor: Colors.cyanAccent.withOpacity(0.3),
             child: profilePic != null && profilePic.isNotEmpty
                 ? ClipOval(
                     child: CachedNetworkImage(
                       imageUrl: profilePic,
                       fit: BoxFit.cover,
-                      width: 60,
-                      height: 60,
+                      width: 50,
+                      height: 50,
                       placeholder: (context, url) => const CircularProgressIndicator(
                         color: Colors.cyanAccent,
                       ),
                       errorWidget: (context, url, error) => Text(
-                        username[0].toUpperCase(),
-                        style: const TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.bold),
+                        displayUsername[0].toUpperCase(),
+                        style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
                       ),
                     ),
                   )
                 : Text(
-                    username[0].toUpperCase(),
-                    style: const TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.bold),
+                    displayUsername[0].toUpperCase(),
+                    style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
                   ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            username,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.1,
+          const SizedBox(width: 15),
+          Expanded(
+            child: Text(
+              displayUsername,
+              style: const TextStyle(
+                color: Colors.cyanAccent, // Brighter color for better readability
+                fontSize: 18, // Larger font size
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.1,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
