@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -5,6 +6,7 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:cached_network_image/cached_network_image.dart'; // Import cached_network_image
 import 'chat_screen.dart';
 import 'login_screen.dart';
+import 'profile_screen.dart'; // Add the new ProfileScreen import
 
 class UserListScreen extends StatefulWidget {
   final String token;
@@ -297,6 +299,18 @@ class _UserListScreenState extends State<UserListScreen> with SingleTickerProvid
                     ),
                     Row(
                       children: [
+                        IconButton(
+                          icon: const Icon(Icons.person, color: Colors.cyanAccent), // Added Profile button
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ProfileScreen(token: widget.token),
+                              ),
+                            );
+                          },
+                          tooltip: 'Profile',
+                        ),
                         IconButton(
                           icon: const Icon(Icons.refresh, color: Colors.cyanAccent),
                           onPressed: () {
