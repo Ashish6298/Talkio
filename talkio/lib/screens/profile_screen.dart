@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:cached_network_image/cached_network_image.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -320,7 +321,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   }
 }
 
-// Updated Widget for Friends Popup with Search Bar
+// Updated Widget for Friends Popup with New Animations
 class FriendsPopup extends StatefulWidget {
   final List friends;
 
@@ -330,9 +331,17 @@ class FriendsPopup extends StatefulWidget {
   _FriendsPopupState createState() => _FriendsPopupState();
 }
 
-class _FriendsPopupState extends State<FriendsPopup> {
+class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   List<dynamic> _filteredFriends = [];
+
+  // Animation controllers
+  late AnimationController _popupAnimationController;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _fadeAnimation;
+  late Animation<double> _revealAnimation;
+
+  late AnimationController _listAnimationController;
 
   @override
   void initState() {
@@ -340,6 +349,34 @@ class _FriendsPopupState extends State<FriendsPopup> {
     _filteredFriends = widget.friends;
     _searchController.addListener(_filterFriends);
     print('Initial friends list: ${widget.friends}'); // Debug
+
+    // Popup animation controller
+    _popupAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+
+    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
+      CurvedAnimation(parent: _popupAnimationController, curve: Curves.bounceOut),
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _popupAnimationController, curve: Curves.easeIn),
+    );
+
+    _revealAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _popupAnimationController, curve: Curves.easeOut),
+    );
+
+    // List animation controller for wave effect
+    _listAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+
+    // Start the animations
+    _popupAnimationController.forward();
+    _listAnimationController.forward();
   }
 
   void _filterFriends() {
@@ -350,12 +387,18 @@ class _FriendsPopupState extends State<FriendsPopup> {
         return username.contains(query);
       }).toList();
       print('Filtered friends for query "$query": $_filteredFriends'); // Debug
+
+      // Reset and restart the list animation when the filter changes
+      _listAnimationController.reset();
+      _listAnimationController.forward();
     });
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _popupAnimationController.dispose();
+    _listAnimationController.dispose();
     super.dispose();
   }
 
@@ -366,156 +409,223 @@ class _FriendsPopupState extends State<FriendsPopup> {
     final maxListHeight = screenHeight * 0.4; // 40% of screen height
 
     return Dialog(
-      backgroundColor: Colors.black.withOpacity(0.8), // Semi-opaque background for the dialog to dim the background
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1B263B), // Fully opaque dark background (matches the app's gradient theme)
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 2),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.3),
-              blurRadius: 15,
-              offset: const Offset(0, 5),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Your Friends',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                letterSpacing: 1.5,
-              ),
-            ),
-            const SizedBox(height: 15),
-            // Search Bar
-            TextField(
-              controller: _searchController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Search friends...',
-                hintStyle: const TextStyle(color: Colors.white54),
-                prefixIcon: const Icon(Icons.search, color: Colors.cyanAccent),
-                filled: true,
-                fillColor: Colors.white.withOpacity(0.2),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(15),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-            const SizedBox(height: 15),
-            // Friends List with dynamic height
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: maxListHeight, // Dynamic height
-                minHeight: 100, // Minimum height to avoid collapse
-              ),
-              child: _filteredFriends.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'No friends found',
-                        style: TextStyle(color: Colors.white, fontSize: 16),
+      backgroundColor: Colors.black.withOpacity(0.8),
+      child: AnimatedBuilder(
+        animation: _popupAnimationController,
+        builder: (context, child) {
+          return ScaleTransition(
+            scale: _scaleAnimation,
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: ClipOval(
+                clipper: CircularRevealClipper(revealProgress: _revealAnimation.value),
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1B263B),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.cyanAccent.withOpacity(0.3 * _fadeAnimation.value),
+                        blurRadius: 10,
+                        spreadRadius: 2,
                       ),
-                    )
-                  : ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: _filteredFriends.length,
-                      itemBuilder: (context, index) {
-                        final friend = _filteredFriends[index];
-                        return _buildFriendCard(
-                          username: friend['username']?.toString() ?? 'Unknown',
-                          profilePic: friend['profilePic']?.toString(),
-                        );
-                      },
-                    ),
-            ),
-            const SizedBox(height: 15),
-            // Close Button
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.cyanAccent.withOpacity(0.8),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Your Friends',
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 15),
+                      // Search Bar
+                      TextField(
+                        controller: _searchController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Search friends...',
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          prefixIcon: const Icon(Icons.search, color: Colors.cyanAccent),
+                          filled: true,
+                          fillColor: Colors.white.withOpacity(0.2),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 15),
+                      // Friends List with dynamic height
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: maxListHeight,
+                          minHeight: 100,
+                        ),
+                        child: _filteredFriends.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  'No friends found',
+                                  style: TextStyle(color: Colors.white, fontSize: 16),
+                                ),
+                              )
+                            : ListView.builder(
+                                shrinkWrap: true,
+                                itemCount: _filteredFriends.length,
+                                itemBuilder: (context, index) {
+                                  final friend = _filteredFriends[index];
+                                  return _buildWaveFriendCard(
+                                    username: friend['username']?.toString() ?? 'Unknown',
+                                    profilePic: friend['profilePic']?.toString(),
+                                    index: index,
+                                  );
+                                },
+                              ),
+                      ),
+                      const SizedBox(height: 15),
+                      // Close Button
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.cyanAccent.withOpacity(0.8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: const Text(
+                          'Close',
+                          style: TextStyle(color: Colors.white, fontSize: 16),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              child: const Text(
-                'Close',
-                style: TextStyle(color: Colors.white, fontSize: 16),
-              ),
             ),
-          ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildWaveFriendCard({required String username, String? profilePic, required int index}) {
+    // Calculate the delay for each card
+    final delay = 0.1 * index; // 100ms delay per item
+    final animation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _listAnimationController,
+        curve: Interval(
+          delay,
+          1.0,
+          curve: Curves.easeOut,
         ),
       ),
+    );
+
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        // Create a wave effect using a sine function
+        final waveOffset = math.sin(animation.value * math.pi * 2) * 5.0; // Small horizontal wave
+        return Transform.translate(
+          offset: Offset(waveOffset, 20.0 * (1.0 - animation.value)), // Slide up with wave
+          child: Opacity(
+            opacity: animation.value,
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.cyanAccent.withOpacity(0.2 * animation.value),
+                    blurRadius: 5,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+              child: child,
+            ),
+          ),
+        );
+      },
+      child: _buildFriendCard(username: username, profilePic: profilePic),
     );
   }
 
   Widget _buildFriendCard({required String username, String? profilePic}) {
     final displayUsername = username.isEmpty ? 'Unknown' : username;
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1), // Keep the card slightly transparent for contrast
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 25,
-            backgroundColor: Colors.cyanAccent.withOpacity(0.3),
-            child: profilePic != null && profilePic.isNotEmpty
-                ? ClipOval(
-                    child: CachedNetworkImage(
-                      imageUrl: profilePic,
-                      fit: BoxFit.cover,
-                      width: 50,
-                      height: 50,
-                      placeholder: (context, url) => const CircularProgressIndicator(
-                        color: Colors.cyanAccent,
-                      ),
-                      errorWidget: (context, url, error) => Text(
-                        displayUsername[0].toUpperCase(),
-                        style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-                      ),
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 25,
+          backgroundColor: Colors.cyanAccent.withOpacity(0.3),
+          child: profilePic != null && profilePic.isNotEmpty
+              ? ClipOval(
+                  child: CachedNetworkImage(
+                    imageUrl: profilePic,
+                    fit: BoxFit.cover,
+                    width: 50,
+                    height: 50,
+                    placeholder: (context, url) => const CircularProgressIndicator(
+                      color: Colors.cyanAccent,
                     ),
-                  )
-                : Text(
-                    displayUsername[0].toUpperCase(),
-                    style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                    errorWidget: (context, url, error) => Text(
+                      displayUsername[0].toUpperCase(),
+                      style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
                   ),
-          ),
-          const SizedBox(width: 15),
-          Expanded(
-            child: Text(
-              displayUsername,
-              style: const TextStyle(
-                color: Colors.cyanAccent, // Brighter color for better readability
-                fontSize: 18, // Larger font size
-                fontWeight: FontWeight.w600,
-                letterSpacing: 1.1,
-              ),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
+                )
+              : Text(
+                  displayUsername[0].toUpperCase(),
+                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+        ),
+        const SizedBox(width: 15),
+        Expanded(
+          child: Text(
+            displayUsername,
+            style: const TextStyle(
+              color: Colors.cyanAccent,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.1,
             ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
-        ],
-      ),
+        ),
+      ],
     );
+  }
+}
+
+// Custom clipper for circular reveal effect
+class CircularRevealClipper extends CustomClipper<Rect> {
+  final double revealProgress;
+
+  CircularRevealClipper({required this.revealProgress});
+
+  @override
+  Rect getClip(Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.sqrt(size.width * size.width + size.height * size.height) * revealProgress;
+    return Rect.fromCircle(center: center, radius: radius);
+  }
+
+  @override
+  bool shouldReclip(CircularRevealClipper oldClipper) {
+    return revealProgress != oldClipper.revealProgress;
   }
 }
