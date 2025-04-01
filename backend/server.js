@@ -13,8 +13,7 @@ const MongoStore = require("connect-mongo");
 const http = require("http");
 const socketIo = require("socket.io");
 const { setupMessaging } = require("./src/controllers/messageController");
-const { sendFriendRequest, acceptFriendRequest } = require("./src/controllers/userController");
-
+const { sendFriendRequest, acceptFriendRequest,updateBio } = require("./src/controllers/userController");
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -63,6 +62,9 @@ mongoose.connect(process.env.MONGO_URI, {
 app.use("/api/auth", authRoutes);
 app.use("/api", messageRoutes);
 app.use("/api", userRoutes);
+
+
+
 
 // Pass io to user routes
 app.use("/api/send-friend-request", sendFriendRequest(io));

@@ -5,6 +5,7 @@ const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   otp: { type: String },
+  bio:{type:String},
   createdAt: { type: Date, default: Date.now },
   profilePic: { type: String },
   friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // List of friends

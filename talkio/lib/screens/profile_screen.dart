@@ -13,7 +13,7 @@ class ProfileScreen extends StatefulWidget {
   _ProfileScreenState createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
+class _ProfileScreenState extends State<ProfileScreen> with TickerProviderStateMixin { // Changed to TickerProviderStateMixin
   Map<String, dynamic>? _profile;
   bool _isLoading = true;
   late AnimationController _animationController;
@@ -21,6 +21,9 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   late Animation<double> _rotateAnimation;
   late Animation<double> _scaleAnimation;
   late Animation<Offset> _slideAnimation;
+  late AnimationController _bioAnimationController;
+  late Animation<double> _bioScaleAnimation;
+  late Animation<double> _bioOpacityAnimation;
 
   @override
   void initState() {
@@ -46,8 +49,22 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       CurvedAnimation(parent: _animationController, curve: const Interval(0.4, 1.0, curve: Curves.easeOut)),
     );
 
+    _bioAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+
+    _bioScaleAnimation = Tween<double>(begin: 0.95, end: 1.0).animate(
+      CurvedAnimation(parent: _bioAnimationController, curve: Curves.easeInOut),
+    );
+
+    _bioOpacityAnimation = Tween<double>(begin: 0.5, end: 1.0).animate(
+      CurvedAnimation(parent: _bioAnimationController, curve: Curves.easeIn),
+    );
+
     _fetchProfile();
     _animationController.forward();
+    _bioAnimationController.forward();
   }
 
   Future<void> _fetchProfile() async {
@@ -90,13 +107,127 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     }
   }
 
+  Future<void> _updateBio(String newBio) async {
+    final url = Uri.parse('http://10.0.2.2:5000/api/profile/update-bio');
+    try {
+      final response = await http.post(
+        url,
+        headers: {
+          'Authorization': 'Bearer ${widget.token}',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'bio': newBio}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          setState(() {
+            _profile!['bio'] = newBio;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Bio updated successfully',
+                style: TextStyle(color: Colors.white),
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+          _bioAnimationController.reset();
+          _bioAnimationController.forward();
+        } else {
+          throw Exception('Failed to update bio: ${data['message'] ?? 'Unknown error'}');
+        }
+      } else {
+        throw Exception('Failed to update bio: ${response.statusCode} - ${response.body}');
+      }
+    } catch (error) {
+      print('Error updating bio: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Failed to update bio: $error',
+            style: const TextStyle(color: Colors.white),
+          ),
+          backgroundColor: Colors.redAccent.withOpacity(0.8),
+        ),
+      );
+    }
+  }
+
+  void _showEditBioDialog(BuildContext context) {
+    final TextEditingController bioController = TextEditingController(
+      text: _profile!['bio']?.toString() ?? '',
+    );
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1B263B),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+            side: BorderSide(color: Colors.cyanAccent.withOpacity(0.7)),
+          ),
+          title: const Text(
+            'Edit Bio',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          content: TextField(
+            controller: bioController,
+            maxLength: 150,
+            maxLines: 3,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: 'Enter your bio...',
+              hintStyle: const TextStyle(color: Colors.white54),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.2),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Colors.cyanAccent),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final newBio = bioController.text.trim();
+                Navigator.of(context).pop();
+                _updateBio(newBio);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.cyanAccent.withOpacity(0.8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text(
+                'Save',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     _animationController.dispose();
+    _bioAnimationController.dispose();
     super.dispose();
   }
 
-  // Method to show the friends list in a popup
   void _showFriendsPopup(BuildContext context) {
     if (_profile == null || _profile!['friends'] == null || (_profile!['friends'] as List).isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -111,7 +242,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       return;
     }
 
-    print('Friends list before showing popup: ${_profile!['friends']}'); // Debug
+    print('Friends list before showing popup: ${_profile!['friends']}');
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -161,7 +292,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                // Profile Card with Rotate and Fade Animation
+                                // Profile Card
                                 FadeTransition(
                                   opacity: _fadeAnimation,
                                   child: Transform.rotate(
@@ -232,7 +363,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                                   ),
                                 ),
                                 const SizedBox(height: 30),
-                                // Info Tiles with Scale Animation
+                                // Info Tiles
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                   children: [
@@ -265,6 +396,80 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
                                       ),
                                     ),
                                   ],
+                                ),
+                                const SizedBox(height: 30),
+                                // Animated Bio Section
+                                SlideTransition(
+                                  position: _slideAnimation,
+                                  child: AnimatedBuilder(
+                                    animation: _bioAnimationController,
+                                    builder: (context, child) {
+                                      return ScaleTransition(
+                                        scale: _bioScaleAnimation,
+                                        child: Opacity(
+                                          opacity: _bioOpacityAnimation.value,
+                                          child: Container(
+                                            padding: const EdgeInsets.all(20),
+                                            margin: const EdgeInsets.symmetric(horizontal: 20),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withOpacity(0.1),
+                                              borderRadius: BorderRadius.circular(20),
+                                              border: Border.all(color: Colors.cyanAccent.withOpacity(0.7), width: 2),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black.withOpacity(0.3),
+                                                  blurRadius: 15,
+                                                  offset: const Offset(0, 5),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.center,
+                                              children: [
+                                                const Text(
+                                                  'Bio',
+                                                  style: TextStyle(
+                                                    fontSize: 24,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.white,
+                                                    letterSpacing: 1.5,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 10),
+                                                Text(
+                                                  _profile!['bio']?.toString().isNotEmpty == true
+                                                      ? _profile!['bio'] as String
+                                                      : 'No bio yet',
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    color: Colors.white.withOpacity(0.8),
+                                                    fontStyle: _profile!['bio']?.toString().isNotEmpty == true
+                                                        ? FontStyle.normal
+                                                        : FontStyle.italic,
+                                                  ),
+                                                  textAlign: TextAlign.center,
+                                                  maxLines: 5,
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                                const SizedBox(height: 15),
+                                                TextButton(
+                                                  onPressed: () => _showEditBioDialog(context),
+                                                  child: const Text(
+                                                    'Edit Bio',
+                                                    style: TextStyle(
+                                                      color: Colors.cyanAccent,
+                                                      fontSize: 16,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
                                 ),
                                 const SizedBox(height: 30),
                               ],
@@ -321,7 +526,6 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   }
 }
 
-// Updated Widget for Friends Popup with New Animations
 class FriendsPopup extends StatefulWidget {
   final List friends;
 
@@ -335,7 +539,6 @@ class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMix
   final TextEditingController _searchController = TextEditingController();
   List<dynamic> _filteredFriends = [];
 
-  // Animation controllers
   late AnimationController _popupAnimationController;
   late Animation<double> _scaleAnimation;
   late Animation<double> _fadeAnimation;
@@ -348,9 +551,8 @@ class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMix
     super.initState();
     _filteredFriends = widget.friends;
     _searchController.addListener(_filterFriends);
-    print('Initial friends list: ${widget.friends}'); // Debug
+    print('Initial friends list: ${widget.friends}');
 
-    // Popup animation controller
     _popupAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
@@ -368,13 +570,11 @@ class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMix
       CurvedAnimation(parent: _popupAnimationController, curve: Curves.easeOut),
     );
 
-    // List animation controller for wave effect
     _listAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     );
 
-    // Start the animations
     _popupAnimationController.forward();
     _listAnimationController.forward();
   }
@@ -386,9 +586,8 @@ class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMix
         final username = friend['username']?.toString().toLowerCase() ?? '';
         return username.contains(query);
       }).toList();
-      print('Filtered friends for query "$query": $_filteredFriends'); // Debug
+      print('Filtered friends for query "$query": $_filteredFriends');
 
-      // Reset and restart the list animation when the filter changes
       _listAnimationController.reset();
       _listAnimationController.forward();
     });
@@ -404,9 +603,8 @@ class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
-    // Make the height dynamic based on screen size
     final screenHeight = MediaQuery.of(context).size.height;
-    final maxListHeight = screenHeight * 0.4; // 40% of screen height
+    final maxListHeight = screenHeight * 0.4;
 
     return Dialog(
       backgroundColor: Colors.black.withOpacity(0.8),
@@ -446,7 +644,6 @@ class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMix
                         ),
                       ),
                       const SizedBox(height: 15),
-                      // Search Bar
                       TextField(
                         controller: _searchController,
                         style: const TextStyle(color: Colors.white),
@@ -463,7 +660,6 @@ class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMix
                         ),
                       ),
                       const SizedBox(height: 15),
-                      // Friends List with dynamic height
                       ConstrainedBox(
                         constraints: BoxConstraints(
                           maxHeight: maxListHeight,
@@ -490,7 +686,6 @@ class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMix
                               ),
                       ),
                       const SizedBox(height: 15),
-                      // Close Button
                       ElevatedButton(
                         onPressed: () {
                           Navigator.of(context).pop();
@@ -518,8 +713,7 @@ class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMix
   }
 
   Widget _buildWaveFriendCard({required String username, String? profilePic, required int index}) {
-    // Calculate the delay for each card
-    final delay = 0.1 * index; // 100ms delay per item
+    final delay = 0.1 * index;
     final animation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _listAnimationController,
@@ -534,10 +728,9 @@ class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMix
     return AnimatedBuilder(
       animation: animation,
       builder: (context, child) {
-        // Create a wave effect using a sine function
-        final waveOffset = math.sin(animation.value * math.pi * 2) * 5.0; // Small horizontal wave
+        final waveOffset = math.sin(animation.value * math.pi * 2) * 5.0;
         return Transform.translate(
-          offset: Offset(waveOffset, 20.0 * (1.0 - animation.value)), // Slide up with wave
+          offset: Offset(waveOffset, 20.0 * (1.0 - animation.value)),
           child: Opacity(
             opacity: animation.value,
             child: Container(
@@ -611,7 +804,6 @@ class _FriendsPopupState extends State<FriendsPopup> with TickerProviderStateMix
   }
 }
 
-// Custom clipper for circular reveal effect
 class CircularRevealClipper extends CustomClipper<Rect> {
   final double revealProgress;
 
