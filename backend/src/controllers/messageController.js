@@ -1,6 +1,8 @@
-const jwt = require('jsonwebtoken');
-const Message = require('../models/Message');
-const User = require('../models/User');
+//messageController.js
+
+const jwt = require("jsonwebtoken");
+const Message = require("../models/Message");
+const User = require("../models/User");
 
 const setupMessaging = (io) => {
   io.use((socket, next) => {
@@ -22,67 +24,99 @@ const setupMessaging = (io) => {
 
     socket.join(socket.userId);
 
-    socket.on("sendMessage", async ({ receiverId, content, isVoice, voiceDuration, voiceData, voiceId, isImage, imageData, imageId }) => {
-      try {
-        const senderId = socket.userId;
-        if (!receiverId || !content) {
-          return socket.emit("error", { error: "Receiver ID and content are required" });
-        }
-        if (isVoice && !voiceId) {
-          return socket.emit("error", { error: "Voice ID is required for voice messages" });
-        }
-        if (isImage && !imageId) {
-          return socket.emit("error", { error: "Image ID is required for image messages" });
-        }
+    socket.on(
+      "sendMessage",
+      async ({
+        receiverId,
+        content,
+        isVoice,
+        voiceDuration,
+        voiceData,
+        voiceId,
+        isImage,
+        imageData,
+        imageId,
+      }) => {
+        try {
+          const senderId = socket.userId;
+          if (!receiverId || !content) {
+            return socket.emit("error", {
+              error: "Receiver ID and content are required",
+            });
+          }
+          if (isVoice && !voiceId) {
+            return socket.emit("error", {
+              error: "Voice ID is required for voice messages",
+            });
+          }
+          if (isImage && !imageId) {
+            return socket.emit("error", {
+              error: "Image ID is required for image messages",
+            });
+          }
 
-        const sender = await User.findById(senderId).select('friends');
-        if (!sender.friends.includes(receiverId)) {
-          return socket.emit("error", { error: "You can only message friends" });
-        }
+          const sender = await User.findById(senderId).select("friends");
+          if (!sender.friends.includes(receiverId)) {
+            return socket.emit("error", {
+              error: "You can only message friends",
+            });
+          }
 
-        const message = new Message({
-          sender: senderId,
-          receiver: receiverId,
-          content,
-          isVoice: isVoice || false,
-          voiceDuration: isVoice ? voiceDuration : null,
-          voiceId: isVoice ? voiceId : null,
-          isImage: isImage || false,
-          imageId: isImage ? imageId : null,
-          seen: false,
-        });
-        await message.save();
-
-        io.to(receiverId).emit("receiveMessage", message);
-        socket.emit("messageSent", message);
-
-        if (isVoice && voiceData) {
-          io.to(receiverId).emit("voiceNoteData", {
-            messageId: message._id,
-            voiceId: message.voiceId,
-            voiceData,
-            voiceDuration,
+          const message = new Message({
+            sender: senderId,
+            receiver: receiverId,
+            content,
+            isVoice: isVoice || false,
+            voiceDuration: isVoice ? voiceDuration : null,
+            voiceId: isVoice ? voiceId : null,
+            isImage: isImage || false,
+            imageId: isImage ? imageId : null,
+            seen: false,
           });
-        }
+          await message.save();
 
-        if (isImage && imageData) {
-          io.to(receiverId).emit("imageData", {
+          io.to(receiverId).emit("receiveMessage", message);
+          socket.emit("messageSent", message);
+
+          if (isVoice && voiceData) {
+            io.to(receiverId).emit("voiceNoteData", {
+              messageId: message._id,
+              voiceId: message.voiceId,
+              voiceData,
+              voiceDuration,
+            });
+          }
+
+          if (isImage && imageData) {
+            io.to(receiverId).emit("imageData", {
+              messageId: message._id,
+              imageId: message.imageId,
+              imageData,
+            });
+          }
+
+          message.deliveredAt = new Date();
+          await message.save();
+          io.to(senderId).emit("messageDelivered", {
             messageId: message._id,
-            imageId: message.imageId,
-            imageData,
+            deliveredAt: message.deliveredAt,
           });
+
+          console.log(
+            `Message sent from ${senderId} to ${receiverId}: ${
+              isVoice
+                ? `Voice (${voiceDuration}s)`
+                : isImage
+                ? `Image (ID: ${imageId})`
+                : content
+            }`
+          );
+        } catch (error) {
+          console.error("Error sending message:", error);
+          socket.emit("error", { error: "Failed to send message" });
         }
-
-        message.deliveredAt = new Date();
-        await message.save();
-        io.to(senderId).emit("messageDelivered", { messageId: message._id, deliveredAt: message.deliveredAt });
-
-        console.log(`Message sent from ${senderId} to ${receiverId}: ${isVoice ? `Voice (${voiceDuration}s)` : isImage ? `Image (ID: ${imageId})` : content}`);
-      } catch (error) {
-        console.error("Error sending message:", error);
-        socket.emit("error", { error: "Failed to send message" });
       }
-    });
+    );
 
     socket.on("markMessagesAsSeen", async ({ senderId }) => {
       try {
@@ -117,8 +151,13 @@ const setupMessaging = (io) => {
           return socket.emit("error", { error: "Message not found" });
         }
 
-        if (message.sender.toString() !== userId && message.receiver.toString() !== userId) {
-          return socket.emit("error", { error: "You can only react to messages in your chats" });
+        if (
+          message.sender.toString() !== userId &&
+          message.receiver.toString() !== userId
+        ) {
+          return socket.emit("error", {
+            error: "You can only react to messages in your chats",
+          });
         }
 
         message.reactions.push({
@@ -141,19 +180,27 @@ const setupMessaging = (io) => {
           timestamp: new Date(),
         });
 
-        console.log(`Reaction added by ${userId} to message ${messageId}: ${emoji}`);
+        console.log(
+          `Reaction added by ${userId} to message ${messageId}: ${emoji}`
+        );
       } catch (error) {
         console.error("Error adding reaction:", error);
         socket.emit("error", { error: "Failed to add reaction" });
       }
     });
 
-    // New event for forwarding messages
     socket.on("forwardMessage", async ({ messageId, receiverIds }) => {
       try {
         const senderId = socket.userId;
-        if (!messageId || !receiverIds || !Array.isArray(receiverIds) || receiverIds.length === 0) {
-          return socket.emit("error", { error: "Message ID and valid receiver IDs are required" });
+        if (
+          !messageId ||
+          !receiverIds ||
+          !Array.isArray(receiverIds) ||
+          receiverIds.length === 0
+        ) {
+          return socket.emit("error", {
+            error: "Message ID and valid receiver IDs are required",
+          });
         }
 
         const originalMessage = await Message.findById(messageId);
@@ -161,10 +208,14 @@ const setupMessaging = (io) => {
           return socket.emit("error", { error: "Original message not found" });
         }
 
-        const sender = await User.findById(senderId).select('friends');
-        const validReceiverIds = receiverIds.filter(id => sender.friends.includes(id));
+        const sender = await User.findById(senderId).select("friends");
+        const validReceiverIds = receiverIds.filter((id) =>
+          sender.friends.includes(id)
+        );
         if (validReceiverIds.length === 0) {
-          return socket.emit("error", { error: "No valid friends selected to forward to" });
+          return socket.emit("error", {
+            error: "No valid friends selected to forward to",
+          });
         }
 
         const forwardedMessages = [];
@@ -190,7 +241,7 @@ const setupMessaging = (io) => {
             io.to(receiverId).emit("voiceNoteData", {
               messageId: forwardedMessage._id,
               voiceId: forwardedMessage.voiceId,
-              voiceData: originalMessage.voiceData, // Assuming voiceData is stored or retrievable
+              voiceData: originalMessage.voiceData,
               voiceDuration: forwardedMessage.voiceDuration,
             });
           }
@@ -199,13 +250,16 @@ const setupMessaging = (io) => {
             io.to(receiverId).emit("imageData", {
               messageId: forwardedMessage._id,
               imageId: forwardedMessage.imageId,
-              imageData: originalMessage.imageData, // Assuming imageData is stored or retrievable
+              imageData: originalMessage.imageData,
             });
           }
 
           forwardedMessage.deliveredAt = new Date();
           await forwardedMessage.save();
-          io.to(senderId).emit("messageDelivered", { messageId: forwardedMessage._id, deliveredAt: forwardedMessage.deliveredAt });
+          io.to(senderId).emit("messageDelivered", {
+            messageId: forwardedMessage._id,
+            deliveredAt: forwardedMessage.deliveredAt,
+          });
         }
 
         socket.emit("messageForwarded", {
@@ -213,15 +267,50 @@ const setupMessaging = (io) => {
           originalMessageId: messageId,
         });
 
-        console.log(`Message ${messageId} forwarded by ${senderId} to ${validReceiverIds.length} friends`);
+        console.log(
+          `Message ${messageId} forwarded by ${senderId} to ${validReceiverIds.length} friends`
+        );
       } catch (error) {
         console.error("Error forwarding message:", error);
         socket.emit("error", { error: "Failed to forward message" });
       }
     });
 
+    socket.on("deleteMessage", async ({ messageId }) => {
+      try {
+        const userId = socket.userId;
+        const message = await Message.findById(messageId);
+
+        if (!message) {
+          return socket.emit("error", { error: "Message not found" });
+        }
+
+        // Only allow sender to delete the message
+        if (message.sender.toString() !== userId) {
+          return socket.emit("error", {
+            error: "You can only delete your own messages",
+          });
+        }
+
+        await Message.deleteOne({ _id: messageId });
+
+        // Notify both sender and receiver about the deletion
+        io.to(message.sender.toString()).emit("messageDeleted", { messageId });
+        io.to(message.receiver.toString()).emit("messageDeleted", {
+          messageId,
+        });
+
+        console.log(`Message ${messageId} deleted by ${userId}`);
+      } catch (error) {
+        console.error("Error deleting message:", error);
+        socket.emit("error", { error: "Failed to delete message" });
+      }
+    });
+
     socket.on("disconnect", () => {
-      console.log(`User disconnected: ${socket.userId} (Socket ID: ${socket.id})`);
+      console.log(
+        `User disconnected: ${socket.userId} (Socket ID: ${socket.id})`
+      );
     });
   });
 };
@@ -232,15 +321,22 @@ const getChatHistory = async (req, res) => {
 
   try {
     if (!token) {
-      return res.status(401).json({ success: false, message: "Token required" });
+      return res
+        .status(401)
+        .json({ success: false, message: "Token required" });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const userId = decoded.id;
 
-    const user = await User.findById(userId).select('friends');
+    const user = await User.findById(userId).select("friends");
     if (!user.friends.includes(otherUserId)) {
-      return res.status(403).json({ success: false, message: "You can only view chat history with friends" });
+      return res
+        .status(403)
+        .json({
+          success: false,
+          message: "You can only view chat history with friends",
+        });
     }
 
     const messages = await Message.find({
@@ -249,37 +345,54 @@ const getChatHistory = async (req, res) => {
         { sender: otherUserId, receiver: userId },
       ],
     })
-      .populate('reactions.userId', 'username')
+      .populate("reactions.userId", "username")
       .sort({ timestamp: 1 });
 
     res.json({ success: true, messages });
   } catch (error) {
     console.error("Error fetching messages:", error);
-    res.status(500).json({ success: false, message: "Error fetching messages", error: error.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Error fetching messages",
+        error: error.message,
+      });
   }
 };
 
-// New endpoint to get friends list
 const getFriendsList = async (req, res) => {
   const token = req.headers.authorization?.split(" ")[1];
 
   try {
     if (!token) {
-      return res.status(401).json({ success: false, message: "Token required" });
+      return res
+        .status(401)
+        .json({ success: false, message: "Token required" });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const userId = decoded.id;
 
-    const user = await User.findById(userId).select('friends').populate('friends', 'username _id');
+    const user = await User.findById(userId)
+      .select("friends")
+      .populate("friends", "username _id");
     if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
     res.json({ success: true, friends: user.friends });
   } catch (error) {
     console.error("Error fetching friends list:", error);
-    res.status(500).json({ success: false, message: "Error fetching friends list", error: error.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Error fetching friends list",
+        error: error.message,
+      });
   }
 };
 

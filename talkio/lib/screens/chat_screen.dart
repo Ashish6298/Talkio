@@ -1,4 +1,6 @@
 
+
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -486,6 +488,16 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       );
     });
 
+    socket.on('messageDeleted', (data) {
+      AppLogger.info('Message deleted: $data');
+      setState(() {
+        final messageIndex = _messages.indexWhere((msg) => msg['_id']?.toString() == data['messageId']?.toString());
+        if (messageIndex != -1) {
+          _messages.removeAt(messageIndex);
+        }
+      });
+    });
+
     socket.on('error', (error) {
       AppLogger.error('ChatScreen: Socket error: $error');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -785,7 +797,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         'imageId': imageId,
         'localFilePath': filePath,
         'sender': _currentUserId,
-        'timestamp': DateTime.now().toIso8601String(),       
+        'timestamp': DateTime.now().toIso8601String(),
         'tempId': tempId,
       };
 
@@ -1101,6 +1113,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     );
   }
 
+  void _deleteMessage(String messageId) {
+    socket.emit('deleteMessage', {'messageId': messageId});
+    AppLogger.info('Delete message requested for messageId: $messageId');
+  }
+
   void _showMessageOptions(String messageId, int index) {
     final RenderBox? renderBox = _messageKeys[index]?.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) {
@@ -1109,6 +1126,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     }
 
     final position = renderBox.localToGlobal(Offset.zero);
+    final isSentByMe = _messages[index]['sender']?.toString() == _currentUserId;
 
     showMenu(
       context: context,
@@ -1124,6 +1142,14 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           child: const Text('Forward'),
           onTap: () => _showForwardDialog(messageId),
         ),
+        if (isSentByMe) // Only show delete option for messages sent by the user
+          PopupMenuItem(
+            value: 'delete',
+            child: const Text('Unsend'),
+            onTap: () {
+              _deleteMessage(messageId);
+            },
+          ),
       ],
     );
   }
