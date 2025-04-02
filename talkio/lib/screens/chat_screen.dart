@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -12,7 +13,7 @@ import 'package:uuid/uuid.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
-// Logger setup
+// Logger setup (unchanged)
 class AppLogger {
   static final Logger _logger = Logger(
     printer: PrettyPrinter(
@@ -109,6 +110,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     _fetchChatHistory();
     _markMessagesAsSeen();
     _checkAndRequestPermissions();
+
+    // Ensure scroll to bottom after initialization
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToBottom();
+    });
   }
 
   Future<String> getDownloadDirectory() async {
@@ -438,7 +444,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       });
     });
 
-    // Listen for reactions
     socket.on('reactionAdded', (data) {
       AppLogger.info('Reaction added: $data');
       setState(() {
@@ -448,12 +453,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             _messages[messageIndex]['reactions'] = [];
           }
 
-          // Check if the user already reacted
           final existingReactionIndex = _messages[messageIndex]['reactions']
               .indexWhere((reaction) => reaction['userId'] == data['userId']);
           
           if (existingReactionIndex != -1) {
-            // Replace the existing reaction with the new one
             _messages[messageIndex]['reactions'][existingReactionIndex] = {
               'emoji': data['emoji'],
               'userId': data['userId'],
@@ -461,7 +464,6 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               'timestamp': data['timestamp'],
             };
           } else {
-            // Add a new reaction
             _messages[messageIndex]['reactions'].add({
               'emoji': data['emoji'],
               'userId': data['userId'],
@@ -473,10 +475,15 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       });
     });
 
-    // Listen for reaction notifications (notification already removed as per previous request)
     socket.on('reactionNotification', (data) {
       AppLogger.info('Received reaction notification: $data');
-      // Notification removed as per previous request
+    });
+
+    socket.on('messageForwarded', (data) {
+      AppLogger.info('Message forwarded confirmation: $data');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Message forwarded to ${data['forwardedTo'].length} friends')),
+      );
     });
 
     socket.on('error', (error) {
@@ -552,12 +559,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
               }
             }
 
-            // Ensure only one reaction per user when fetching chat history
             if (message['reactions'] != null && message['reactions'].isNotEmpty) {
               final Map<String, Map<String, dynamic>> uniqueReactions = {};
               for (var reaction in message['reactions']) {
                 final userId = reaction['userId'].toString();
-                uniqueReactions[userId] = reaction; // Overwrite previous reaction for the same user
+                uniqueReactions[userId] = reaction;
               }
               message['reactions'] = uniqueReactions.values.toList();
             }
@@ -567,7 +573,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
             _messages.clear();
             _messages.addAll(fetchedMessages);
             AppLogger.info('Messages fetched: ${_messages.length}');
-            _scrollToBottom();
+            _scrollToBottom(); // Scroll to bottom after fetching history
           });
         } else {
           AppLogger.warning('Chat history fetch failed: ${data['message']}');
@@ -779,7 +785,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         'imageId': imageId,
         'localFilePath': filePath,
         'sender': _currentUserId,
-        'timestamp': DateTime.now().toIso8601String(),
+        'timestamp': DateTime.now().toIso8601String(),       
         'tempId': tempId,
       };
 
@@ -908,16 +914,11 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
       }
     });
   }
 
-  // Method to add a reaction
   void _addReaction(String messageId, String emoji, String messageSenderId) {
     AppLogger.info('Adding reaction: messageId=$messageId, emoji=$emoji');
     socket.emit('addReaction', {
@@ -925,11 +926,10 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       'emoji': emoji,
       'senderId': _currentUserId,
       'receiverId': widget.receiverId,
-      'messageSenderId': messageSenderId, // To notify the original sender of the message
+      'messageSenderId': messageSenderId,
     });
   }
 
-  // Show reaction picker as a pop-up
   void _showReactionPicker(String messageId, int index, String messageSenderId) {
     final RenderBox? renderBox = _messageKeys[index]?.currentContext?.findRenderObject() as RenderBox?;
     if (renderBox == null) {
@@ -986,6 +986,145 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
           style: const TextStyle(fontSize: 24),
         ),
       ),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchFriendsList() async {
+    final url = Uri.parse('$baseUrl/api/users');
+    AppLogger.info('Attempting to fetch friends list from: $url');
+    try {
+      final response = await http.get(
+        url,
+        headers: {
+          'Authorization': 'Bearer ${widget.token}',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      AppLogger.info('Friends list response status: ${response.statusCode}');
+      AppLogger.debug('Friends list response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success']) {
+          AppLogger.info('Successfully fetched friends list: ${data['friends'].length} friends');
+          return List<Map<String, dynamic>>.from(data['friends']);
+        } else {
+          AppLogger.warning('Friends list fetch failed: ${data['message']}');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to fetch friends: ${data['message']}')),
+          );
+          return [];
+        }
+      } else {
+        AppLogger.error('Failed to fetch friends list: ${response.statusCode} - ${response.body}');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to fetch friends list: ${response.statusCode}')),
+        );
+        return [];
+      }
+    } catch (e) {
+      AppLogger.error('Error fetching friends list', e);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error fetching friends list')),
+      );
+      return [];
+    }
+  }
+
+  void _showForwardDialog(String messageId) async {
+    final friends = await _fetchFriendsList();
+    if (friends.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No friends available to forward to')),
+      );
+      return;
+    }
+
+    final Map<String, bool> selectedFriends = {};
+    for (var friend in friends) {
+      selectedFriends[friend['_id']] = false;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Forward Message'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: friends.length,
+              itemBuilder: (context, index) {
+                final friend = friends[index];
+                return CheckboxListTile(
+                  title: Text(friend['username']),
+                  value: selectedFriends[friend['_id']] ?? false,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      selectedFriends[friend['_id']] = value ?? false;
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                final receiverIds = selectedFriends.entries
+                    .where((entry) => entry.value)
+                    .map((entry) => entry.key)
+                    .toList();
+                if (receiverIds.isNotEmpty) {
+                  socket.emit('forwardMessage', {
+                    'messageId': messageId,
+                    'receiverIds': receiverIds,
+                  });
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please select at least one friend')),
+                  );
+                }
+                Navigator.pop(context);
+              },
+              child: const Text('Forward'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showMessageOptions(String messageId, int index) {
+    final RenderBox? renderBox = _messageKeys[index]?.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null) {
+      AppLogger.error('Cannot find render box for message at index $index');
+      return;
+    }
+
+    final position = renderBox.localToGlobal(Offset.zero);
+
+    showMenu(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx + renderBox.size.width,
+        position.dy + renderBox.size.height,
+      ),
+      items: [
+        PopupMenuItem(
+          value: 'forward',
+          child: const Text('Forward'),
+          onTap: () => _showForwardDialog(messageId),
+        ),
+      ],
     );
   }
 
@@ -1138,6 +1277,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                     final voiceId = message['voiceId']?.toString() ?? message['_id']?.toString();
                     final isPlaying = _currentlyPlayingVoiceId == voiceId;
                     final localFilePath = message['localFilePath']?.toString();
+                    final isForwarded = message['forwardedFrom'] != null;
 
                     _messageKeys[index] = GlobalKey();
 
@@ -1178,156 +1318,187 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                               child: Container(
                                 margin: const EdgeInsets.symmetric(vertical: 5),
                                 padding: const EdgeInsets.all(12),
-                                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
                                 decoration: BoxDecoration(
                                   color: isSentByMe ? Colors.cyanAccent.withOpacity(0.2) : Colors.white.withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(15),
                                 ),
-                                child: Column(
-                                  crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      username,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: isSentByMe ? Colors.cyanAccent : Colors.white70,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 5),
-                                    if (message['isVoice'] == true && voiceId != null)
+                                child: IntrinsicWidth(
+                                  child: Column(
+                                    crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                                    children: [
+                                      if (isForwarded) ...[
+                                        const Text(
+                                          'Forwarded',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 5),
+                                      ],
                                       Row(
-                                        mainAxisSize: MainAxisSize.min,
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                         children: [
+                                          Text(
+                                            username,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: isSentByMe ? Colors.cyanAccent : Colors.white70,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
                                           GestureDetector(
-                                            onTap: () => _playVoiceMessage(voiceId, localFilePath),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                _pulseAnimation != null
-                                                    ? ScaleTransition(
-                                                        scale: isPlaying ? _pulseAnimation! : const AlwaysStoppedAnimation(1.0),
-                                                        child: Icon(
+                                            onTap: () => _showMessageOptions(message['_id'].toString(), index),
+                                            child: const Icon(
+                                              Icons.more_vert,
+                                              size: 16,
+                                              color: Colors.white70,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 5),
+                                      if (message['isVoice'] == true && voiceId != null)
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            GestureDetector(
+                                              onTap: () => _playVoiceMessage(voiceId, localFilePath),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  _pulseAnimation != null
+                                                      ? ScaleTransition(
+                                                          scale: isPlaying ? _pulseAnimation! : const AlwaysStoppedAnimation(1.0),
+                                                          child: Icon(
+                                                            isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                                                            color: Colors.cyanAccent,
+                                                          ),
+                                                        )
+                                                      : Icon(
                                                           isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
                                                           color: Colors.cyanAccent,
                                                         ),
-                                                      )
-                                                    : Icon(
-                                                        isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                                                        color: Colors.cyanAccent,
-                                                      ),
-                                                const SizedBox(width: 5),
-                                                Text(
-                                                  '${message['voiceDuration']?.toString() ?? '0'}s',
+                                                  const SizedBox(width: 5),
+                                                  Text(
+                                                    '${message['voiceDuration']?.toString() ?? '0'}s',
+                                                    style: const TextStyle(fontSize: 16, color: Colors.white),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            if (isSentByMe) ...[
+                                              const SizedBox(width: 5),
+                                              Icon(
+                                                Icons.done_all,
+                                                size: 16,
+                                                color: message['seen'] == true ? Colors.cyanAccent : Colors.grey,
+                                              ),
+                                            ],
+                                          ],
+                                        )
+                                      else if (message['isImage'] == true && localFilePath != null)
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Image.file(
+                                              File(localFilePath),
+                                              width: 200,
+                                              height: 200,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (context, error, stackTrace) => const Text(
+                                                'Failed to load image',
+                                                style: TextStyle(color: Colors.red),
+                                              ),
+                                            ),
+                                            if (isSentByMe) ...[
+                                              const SizedBox(width: 5),
+                                              Icon(
+                                                Icons.done_all,
+                                                size: 16,
+                                                color: message['seen'] == true ? Colors.cyanAccent : Colors.grey,
+                                              ),
+                                            ],
+                                          ],
+                                        )
+                                      else
+                                        ConstrainedBox(
+                                          constraints: BoxConstraints(
+                                            maxWidth: MediaQuery.of(context).size.width * 0.7,
+                                            minWidth: 100,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  message['content']?.toString() ?? '',
                                                   style: const TextStyle(fontSize: 16, color: Colors.white),
                                                 ),
-                                              ],
-                                            ),
-                                          ),
-                                          if (isSentByMe) ...[
-                                            const SizedBox(width: 5),
-                                            Icon(
-                                              Icons.done_all,
-                                              size: 16,
-                                              color: message['seen'] == true ? Colors.cyanAccent : Colors.grey,
-                                            ),
-                                          ],
-                                        ],
-                                      )
-                                    else if (message['isImage'] == true && localFilePath != null)
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Image.file(
-                                            File(localFilePath),
-                                            width: 200,
-                                            height: 200,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (context, error, stackTrace) => const Text(
-                                              'Failed to load image',
-                                              style: TextStyle(color: Colors.red),
-                                            ),
-                                          ),
-                                          if (isSentByMe) ...[
-                                            const SizedBox(width: 5),
-                                            Icon(
-                                              Icons.done_all,
-                                              size: 16,
-                                              color: message['seen'] == true ? Colors.cyanAccent : Colors.grey,
-                                            ),
-                                          ],
-                                        ],
-                                      )
-                                    else
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Flexible(
-                                            child: Text(
-                                              message['content']?.toString() ?? '',
-                                              style: const TextStyle(fontSize: 16, color: Colors.white),
-                                            ),
-                                          ),
-                                          if (isSentByMe) ...[
-                                            const SizedBox(width: 5),
-                                            Icon(
-                                              Icons.done_all,
-                                              size: 16,
-                                              color: message['seen'] == true ? Colors.cyanAccent : Colors.grey,
-                                            ),
-                                          ],
-                                        ],
-                                      ),
-                                    const SizedBox(height: 5),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          _formatTimestamp(message['timestamp']?.toString()),
-                                          style: const TextStyle(fontSize: 10, color: Colors.white70),
-                                        ),
-                                        if (isSentByMe && message['seen'] == true) ...[
-                                          const SizedBox(width: 5),
-                                          Text(
-                                            'Seen',
-                                            style: TextStyle(
-                                              fontSize: 10,
-                                              color: Colors.cyanAccent,
-                                            ),
-                                          ),
-                                        ],
-                                        const SizedBox(width: 5),
-                                        GestureDetector(
-                                          onTap: () => _showReactionPicker(
-                                            message['_id'].toString(),
-                                            index,
-                                            message['sender'].toString(),
-                                          ),
-                                          child: const Icon(
-                                            Icons.emoji_emotions_outlined,
-                                            size: 16,
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    if (message['reactions'] != null && message['reactions'].isNotEmpty)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 5),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: message['reactions'].map<Widget>((reaction) {
-                                            return Padding(
-                                              padding: const EdgeInsets.only(right: 5),
-                                              child: Text(
-                                                reaction['emoji'],
-                                                style: const TextStyle(fontSize: 16),
                                               ),
-                                            );
-                                          }).toList(),
+                                              if (isSentByMe) ...[
+                                                const SizedBox(width: 5),
+                                                Icon(
+                                                  Icons.done_all,
+                                                  size: 16,
+                                                  color: message['seen'] == true ? Colors.cyanAccent : Colors.grey,
+                                                ),
+                                              ],
+                                            ],
+                                          ),
                                         ),
+                                      const SizedBox(height: 5),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            _formatTimestamp(message['timestamp']?.toString()),
+                                            style: const TextStyle(fontSize: 10, color: Colors.white70),
+                                          ),
+                                          if (isSentByMe && message['seen'] == true) ...[
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              'Seen',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.cyanAccent,
+                                              ),
+                                            ),
+                                          ],
+                                          const SizedBox(width: 5),
+                                          GestureDetector(
+                                            onTap: () => _showReactionPicker(
+                                              message['_id'].toString(),
+                                              index,
+                                              message['sender'].toString(),
+                                            ),
+                                            child: const Icon(
+                                              Icons.emoji_emotions_outlined,
+                                              size: 16,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                  ],
+                                      if (message['reactions'] != null && message['reactions'].isNotEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 5),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: message['reactions'].map<Widget>((reaction) {
+                                              return Padding(
+                                                padding: const EdgeInsets.only(right: 5),
+                                                child: Text(
+                                                  reaction['emoji'],
+                                                  style: const TextStyle(fontSize: 16),
+                                                ),
+                                              );
+                                            }).toList(),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),

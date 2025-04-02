@@ -1,4 +1,3 @@
-
 const jwt = require('jsonwebtoken');
 const Message = require('../models/Message');
 const User = require('../models/User');
@@ -109,7 +108,6 @@ const setupMessaging = (io) => {
       }
     });
 
-    // New event for adding reactions
     socket.on("addReaction", async ({ messageId, emoji }) => {
       try {
         const userId = socket.userId;
@@ -119,12 +117,10 @@ const setupMessaging = (io) => {
           return socket.emit("error", { error: "Message not found" });
         }
 
-        // Check if the user is either the sender or receiver of the message
         if (message.sender.toString() !== userId && message.receiver.toString() !== userId) {
           return socket.emit("error", { error: "You can only react to messages in your chats" });
         }
 
-        // Add the reaction to the message
         message.reactions.push({
           emoji,
           userId,
@@ -132,7 +128,6 @@ const setupMessaging = (io) => {
         });
         await message.save();
 
-        // Emit the updated message with reactions to both sender and receiver
         io.to(message.sender.toString()).emit("reactionAdded", {
           messageId: message._id,
           emoji,
@@ -150,6 +145,78 @@ const setupMessaging = (io) => {
       } catch (error) {
         console.error("Error adding reaction:", error);
         socket.emit("error", { error: "Failed to add reaction" });
+      }
+    });
+
+    // New event for forwarding messages
+    socket.on("forwardMessage", async ({ messageId, receiverIds }) => {
+      try {
+        const senderId = socket.userId;
+        if (!messageId || !receiverIds || !Array.isArray(receiverIds) || receiverIds.length === 0) {
+          return socket.emit("error", { error: "Message ID and valid receiver IDs are required" });
+        }
+
+        const originalMessage = await Message.findById(messageId);
+        if (!originalMessage) {
+          return socket.emit("error", { error: "Original message not found" });
+        }
+
+        const sender = await User.findById(senderId).select('friends');
+        const validReceiverIds = receiverIds.filter(id => sender.friends.includes(id));
+        if (validReceiverIds.length === 0) {
+          return socket.emit("error", { error: "No valid friends selected to forward to" });
+        }
+
+        const forwardedMessages = [];
+        for (const receiverId of validReceiverIds) {
+          const forwardedMessage = new Message({
+            sender: senderId,
+            receiver: receiverId,
+            content: originalMessage.content,
+            isVoice: originalMessage.isVoice,
+            voiceDuration: originalMessage.voiceDuration,
+            voiceId: originalMessage.voiceId,
+            isImage: originalMessage.isImage,
+            imageId: originalMessage.imageId,
+            seen: false,
+            forwardedFrom: originalMessage._id,
+          });
+          await forwardedMessage.save();
+          forwardedMessages.push(forwardedMessage);
+
+          io.to(receiverId).emit("receiveMessage", forwardedMessage);
+
+          if (originalMessage.isVoice) {
+            io.to(receiverId).emit("voiceNoteData", {
+              messageId: forwardedMessage._id,
+              voiceId: forwardedMessage.voiceId,
+              voiceData: originalMessage.voiceData, // Assuming voiceData is stored or retrievable
+              voiceDuration: forwardedMessage.voiceDuration,
+            });
+          }
+
+          if (originalMessage.isImage) {
+            io.to(receiverId).emit("imageData", {
+              messageId: forwardedMessage._id,
+              imageId: forwardedMessage.imageId,
+              imageData: originalMessage.imageData, // Assuming imageData is stored or retrievable
+            });
+          }
+
+          forwardedMessage.deliveredAt = new Date();
+          await forwardedMessage.save();
+          io.to(senderId).emit("messageDelivered", { messageId: forwardedMessage._id, deliveredAt: forwardedMessage.deliveredAt });
+        }
+
+        socket.emit("messageForwarded", {
+          forwardedTo: validReceiverIds,
+          originalMessageId: messageId,
+        });
+
+        console.log(`Message ${messageId} forwarded by ${senderId} to ${validReceiverIds.length} friends`);
+      } catch (error) {
+        console.error("Error forwarding message:", error);
+        socket.emit("error", { error: "Failed to forward message" });
       }
     });
 
@@ -182,7 +249,7 @@ const getChatHistory = async (req, res) => {
         { sender: otherUserId, receiver: userId },
       ],
     })
-      .populate('reactions.userId', 'username') // Populate the userId in reactions to get the username
+      .populate('reactions.userId', 'username')
       .sort({ timestamp: 1 });
 
     res.json({ success: true, messages });
@@ -192,4 +259,28 @@ const getChatHistory = async (req, res) => {
   }
 };
 
-module.exports = { setupMessaging, getChatHistory };
+// New endpoint to get friends list
+const getFriendsList = async (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+
+  try {
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Token required" });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded.id;
+
+    const user = await User.findById(userId).select('friends').populate('friends', 'username _id');
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    res.json({ success: true, friends: user.friends });
+  } catch (error) {
+    console.error("Error fetching friends list:", error);
+    res.status(500).json({ success: false, message: "Error fetching friends list", error: error.message });
+  }
+};
+
+module.exports = { setupMessaging, getChatHistory, getFriendsList };

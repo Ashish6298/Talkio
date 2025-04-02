@@ -21,7 +21,11 @@ const messageSchema = new mongoose.Schema({
       timestamp: { type: Date, default: Date.now }, // When the reaction was added
     },
   ],
-
+  forwardedFrom: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Message', 
+    default: null 
+  }
 
 });
 
