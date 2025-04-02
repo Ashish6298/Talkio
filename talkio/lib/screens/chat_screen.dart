@@ -1118,42 +1118,70 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     AppLogger.info('Delete message requested for messageId: $messageId');
   }
 
-  void _showMessageOptions(String messageId, int index) {
-    final RenderBox? renderBox = _messageKeys[index]?.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) {
-      AppLogger.error('Cannot find render box for message at index $index');
-      return;
-    }
-
-    final position = renderBox.localToGlobal(Offset.zero);
-    final isSentByMe = _messages[index]['sender']?.toString() == _currentUserId;
-
-    showMenu(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        position.dx + renderBox.size.width,
-        position.dy + renderBox.size.height,
-      ),
-      items: [
-        PopupMenuItem(
-          value: 'forward',
-          child: const Text('Forward'),
-          onTap: () => _showForwardDialog(messageId),
-        ),
-        if (isSentByMe) // Only show delete option for messages sent by the user
-          PopupMenuItem(
-            value: 'delete',
-            child: const Text('Unsend'),
-            onTap: () {
-              _deleteMessage(messageId);
-            },
-          ),
-      ],
-    );
+void _showMessageOptions(String messageId, int index) {
+  final RenderBox? renderBox = _messageKeys[index]?.currentContext?.findRenderObject() as RenderBox?;
+  if (renderBox == null) {
+    AppLogger.error('Cannot find render box for message at index $index');
+    return;
   }
 
+  final position = renderBox.localToGlobal(Offset.zero);
+  final screenWidth = MediaQuery.of(context).size.width;
+  final messageWidth = renderBox.size.width;
+  final messageHeight = renderBox.size.height;
+
+  // Approximate menu dimensions (adjust if needed)
+  const menuWidth = 120.0; // Estimated width of the popup menu
+  const menuHeight = 80.0; // Estimated height of the popup menu
+
+  // Center the menu horizontally over the message
+  double left = position.dx + (messageWidth / 2) - (menuWidth / 2);
+  // Center the menu vertically over the message
+  double top = position.dy + (messageHeight / 2) - (menuHeight / 2);
+
+  // Ensure the menu stays within screen bounds
+  if (left < 0) {
+    left = 0; // Prevent going off the left edge
+  } else if (left + menuWidth > screenWidth) {
+    left = screenWidth - menuWidth; // Prevent going off the right edge
+  }
+
+  // Ensure the menu stays within vertical bounds
+  if (top < 0) {
+    top = 0; // Prevent going off the top edge
+  } else if (top + menuHeight > MediaQuery.of(context).size.height) {
+    top = MediaQuery.of(context).size.height - menuHeight; // Prevent going off the bottom edge
+  }
+
+  showMenu(
+    context: context,
+    position: RelativeRect.fromLTRB(
+      left,
+      top,
+      screenWidth - (left + menuWidth),
+      0, // Bottom is set to 0 to allow the menu to float freely vertically
+    ),
+    items: [
+      PopupMenuItem(
+        value: 'forward',
+        child: const Text('Forward'),
+        onTap: () => _showForwardDialog(messageId),
+      ),
+      if (_messages[index]['sender']?.toString() == _currentUserId) // Only show delete option for messages sent by the user
+        PopupMenuItem(
+          value: 'delete',
+          child: const Text('Unsend'),
+          onTap: () {
+            _deleteMessage(messageId);
+          },
+        ),
+    ],
+    elevation: 8, // Keep the shadow for depth
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(10), // Keep rounded corners
+    ),
+  );
+}
   @override
   void dispose() {
     socket.disconnect();
